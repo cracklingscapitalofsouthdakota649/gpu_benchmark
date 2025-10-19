@@ -28,6 +28,7 @@ __pycache__/
 .tox/
 .eggs/
 .bat
+.benchmarks
 
 # Build/virtualenv
 .env/
