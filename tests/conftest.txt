@@ -1,0 +1,92 @@
+# tests/conftest.py
+import warnings
+import pytest
+
+class GpuInfo:
+    """Detect host GPU/accelerator information."""
+
+    def __init__(self):
+        self.vendor = "cpu"
+        self.name = "CPU"
+        self.available = False  # default
+
+        # Try PyTorch CUDA / ROCm
+        try:
+            import torch
+            if hasattr(torch, "cuda") and torch.cuda.is_available():
+                self.available = True
+                self.vendor = "nvidia"
+                self.name = torch.cuda.get_device_name(0)
+                return
+            # ROCm HIP also uses torch.cuda in PyTorch
+            if hasattr(torch.version, "hip") and torch.version.hip is not None:
+                self.available = True
+                self.vendor = "amd"
+                self.name = "ROCm GPU"
+                return
+        except Exception:
+            pass
+
+        # Intel XPU / OpenCL detection
+        try:
+            import torch
+            if hasattr(torch, "xpu") and torch.xpu.is_available():
+                self.available = True
+                self.vendor = "intel"
+                try:
+                    self.name = torch.xpu.get_device_name(0)
+                except Exception:
+                    self.name = "Intel XPU Device"
+                return
+        except Exception:
+            pass
+
+        # DirectML (Windows)
+        try:
+            import torch_directml as dml
+            _ = dml.device()
+            self.available = True
+            self.vendor = "dml"
+            self.name = "DirectML Device"
+            return
+        except Exception:
+            pass
+
+        # Intel OpenCL fallback
+        try:
+            import pyopencl as cl
+            for platform in cl.get_platforms():
+                for dev in platform.get_devices():
+                    if cl.device_type.to_string(dev.type) == "GPU":
+                        self.available = True
+                        self.vendor = "intel"
+                        self.name = dev.name
+                        return
+        except Exception:
+            pass
+
+
+@pytest.fixture(scope="session")
+def gpu_info():
+    """Return GPU info once per session."""
+    print("\n--- Detecting Host GPU ---")
+    info = GpuInfo()
+    print(f"-> Host: {info.name} (Vendor: {info.vendor}, Accelerator: {info.available})")
+    print("---------------------------------------------------------")
+    return info
+
+
+@pytest.fixture(autouse=True)
+def auto_skip_by_gpu(request, gpu_info):
+    """Automatically skip tests if GPU not available or vendor mismatch."""
+    # Vendor-specific markers
+    if request.node.get_closest_marker("nvidia") and gpu_info.vendor != "nvidia":
+        pytest.skip(f"Skipping @nvidia test, host has {gpu_info.vendor}")
+    if request.node.get_closest_marker("amd") and gpu_info.vendor != "amd":
+        pytest.skip(f"Skipping @amd test, host has {gpu_info.vendor}")
+    if request.node.get_closest_marker("intel") and gpu_info.vendor != "intel":
+        pytest.skip(f"Skipping @intel test, host has {gpu_info.vendor}")
+
+    # General GPU skipping
+    if request.node.get_closest_marker("gpu") and not gpu_info.available:
+        pytest.skip("Skipping @gpu test, no accelerator device available")

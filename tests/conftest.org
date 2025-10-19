@@ -1,0 +1,74 @@
+# tests/conftest.py
+import pytest
+import torch
+import warnings
+
+class GpuInfo:
+    """Simple class to hold GPU detection results."""
+    def __init__(self):
+        self.vendor = "unknown"
+        self.name = "Unknown"
+        self.available = False # Represents if *any* accelerator is available
+
+        if torch.cuda.is_available(): # Check for NVIDIA/AMD (ROCm)
+            self.available = True
+            try:
+                self.name = torch.cuda.get_device_name(0)
+                name_lower = self.name.lower()
+                if "nvidia" in name_lower:
+                    self.vendor = "nvidia"
+                elif "amd" in name_lower: # For AMD ROCm builds
+                    self.vendor = "amd"
+                else:
+                    self.vendor = "other_gpu"
+            except Exception as e:
+                warnings.warn(f"Could not get CUDA device name: {e}")
+                self.name = "CUDA Device (name unknown)"
+                self.vendor = "other_gpu"
+        
+        elif hasattr(torch, "xpu") and torch.xpu.is_available(): # Check for Intel XPU
+            self.available = True
+            self.vendor = "intel"
+            try:
+                self.name = torch.xpu.get_device_name(0)
+            except Exception as e:
+                warnings.warn(f"Could not get XPU device name: {e}")
+                self.name = "Intel XPU Device (name unknown)"
+        
+        else: # No accelerator found
+            self.vendor = "cpu"
+            self.name = "CPU"
+
+@pytest.fixture(scope="session")
+def gpu_info():
+    """
+    Detects GPU info once per session and makes it available to tests.
+    Scope='session' means this runs only ONCE.
+    """
+    print("\n--- Detecting Host Hardware ---")
+    info = GpuInfo()
+    print(f"-> Host: {info.name} (Vendor: {info.vendor}, Accelerator: {info.available})")
+    print("---------------------------------")
+    return info
+
+@pytest.fixture(autouse=True)
+def auto_skip_by_gpu(request, gpu_info):
+    """
+    Automatically skips tests based on GPU markers and detected hardware.
+    'autouse=True' means this fixture runs for EVERY test.
+    """
+    
+    # --- Vendor-Specific Skipping ---
+    if request.node.get_closest_marker("nvidia") and gpu_info.vendor != "nvidia":
+        pytest.skip(f"Skipping @nvidia test, host has {gpu_info.vendor}")
+    
+    if request.node.get_closest_marker("amd") and gpu_info.vendor != "amd":
+        pytest.skip(f"Skipping @amd test, host has {gpu_info.vendor}")
+    
+    if request.node.get_closest_marker("intel") and gpu_info.vendor != "intel":
+        pytest.skip(f"Skipping @intel test, host has {gpu_info.vendor}")
+
+    # --- General GPU Skipping ---
+    # If a test is marked 'gpu' but no accelerator is found, skip it.
+    if request.node.get_closest_marker("gpu") and not gpu_info.available:
+        pytest.skip("Skipping @gpu test, no accelerator device available")

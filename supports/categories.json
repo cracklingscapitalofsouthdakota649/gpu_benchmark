@@ -1,0 +1,22 @@
+[
+  {
+    "name": "GPU Utilization Failures",
+    "messageRegex": "GPU utilization out of bounds",
+    "severity": "critical"
+  },
+  {
+    "name": "CPU Utilization Failures",
+    "messageRegex": "CPU utilization out of bounds",
+    "severity": "normal"
+  },
+  {
+    "name": "Benchmark Errors",
+    "messageRegex": "AttributeError|TypeError|ValueError",
+    "severity": "major"
+  },
+  {
+    "name": "Skipped Tests",
+    "messageRegex": "Skipping @gpu test|Skipping @cpu test",
+    "severity": "minor"
+  }
+]
