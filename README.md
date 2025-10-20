@@ -41,7 +41,8 @@ cd gpu_benchmark
 
 Run the setup script to create a virtual environment, install dependencies, and detect GPU:  
 ```bash
-python gpu_benchmark.py
+Usage: python gpu_benchmark.py <Build_Number> [suite]
+python gpu_benchmark.py 4 gpu
 ```
 
 The script will:  
@@ -82,6 +83,20 @@ Command to execute:
 run_docker.bat
 ```
 
+---
+
+## 📊 Professional Test Reporting  
+
+### 1️⃣ **Interactive Allure Report (Recommended)**  
+```bash
+cal[ venv310\Scripts\activate
+pytest -m gpu --alluredir=allure-results
+allure serve allure-results
+```
+
+📸 *Preview:* 
+
+![Allure Overview Report](https://github.com/luckyjoy/gpu_benchmark/blob/main/reports/allure_report.jpg)
 ---
 
 ## 🌳 Framework Architecture  

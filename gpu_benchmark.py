@@ -243,7 +243,13 @@ def main():
     pytest_cmd = [python_exe, "-m", "pytest", "-v", "--alluredir", results_dir]
     if suite:
         pytest_cmd.extend(["-m", suite])
-    run_cmd(pytest_cmd)
+    
+    # --- FIX START ---
+    # Call run_cmd with check=False so it doesn't fail on non-zero exit code (i.e., test failures).
+    print("[INFO] Running pytest benchmark...")
+    run_cmd(pytest_cmd, check=False)
+    print("[INFO] Pytest run completed.")
+    # --- FIX END ---
 
     # 1. Generate the report
     generate_allure_report(results_dir)
