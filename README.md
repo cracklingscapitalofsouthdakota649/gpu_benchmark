@@ -85,20 +85,6 @@ run_docker.bat
 
 ---
 
-## 📊 Professional Test Reporting  
-
-### 1️⃣ **Interactive Allure Report (Recommended)**  
-```bash
-call venv310\Scripts\activate
-pytest -m gpu --alluredir=allure-results
-allure serve allure-results
-```
-
-📸 *Preview:* 
-
-![Allure Overview Report](https://github.com/luckyjoy/gpu_benchmark/blob/main/reports/allure_report.jpg)
----
-
 ## 🌳 Framework Architecture  
 
 ```
@@ -144,11 +130,21 @@ gpu_benchmark/
 
 ## 📊 Professional Test Reporting  
 
-### 1️⃣ **Interactive Allure Report (Recommended)**  
+### 1️⃣**Interactive Allure Report (Recommended)**  
 ```bash
+python -m venv venv310
+Linux/macOS (Bash/Zsh):	source venv310/bin/activate
+Windows (Command Prompt): call venv310\Scripts\activate
 pytest -m gpu --alluredir=allure-results
 allure serve allure-results
+
+pytest -m gpu --alluredir=allure-results
+allure serve allure-results
+
 ```
+📸 *Preview:* 
+
+![Allure Overview Report](https://github.com/luckyjoy/gpu_benchmark/blob/main/reports/allure_report.jpg)
 
 📸 *Preview of GPU Metrics Dashboard:*  
 
