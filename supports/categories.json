@@ -1,22 +1,62 @@
 [
   {
-    "name": "GPU Utilization Failures",
-    "messageRegex": "GPU utilization out of bounds",
-    "severity": "critical"
+    "name": "🚨 Critical GPU/CPU Failures",
+    "description": "Tests that failed due to hardware or driver-level issues during GPU benchmarking.",
+    "matchedStatuses": ["failed"],
+    "traceRegex": ".*(CUDA|ROCM|OpenCL|Intel GPU|DirectML).*",
+    "messageRegex": ".*(device not found|CUDA error|illegal memory access|GPU failure).*"
   },
   {
-    "name": "CPU Utilization Failures",
-    "messageRegex": "CPU utilization out of bounds",
-    "severity": "normal"
+    "name": "⚙️ Environment / Configuration Errors",
+    "description": "Failures caused by missing libraries, misconfigured environments, or dependency issues.",
+    "matchedStatuses": ["broken"],
+    "messageRegex": ".*(ModuleNotFoundError|ImportError|No module named|missing DLL|torch not installed).*"
   },
   {
-    "name": "Benchmark Errors",
-    "messageRegex": "AttributeError|TypeError|ValueError",
-    "severity": "major"
+    "name": "🐍 Python Runtime Exceptions",
+    "description": "Uncaught Python exceptions during test execution.",
+    "matchedStatuses": ["failed"],
+    "traceRegex": ".*(ValueError|TypeError|AttributeError|KeyError|IndexError|JSONDecodeError).*"
   },
   {
-    "name": "Skipped Tests",
-    "messageRegex": "Skipping @gpu test|Skipping @cpu test",
-    "severity": "minor"
+    "name": "📉 Performance Regression",
+    "description": "Performance dropped significantly compared to previous benchmark baselines.",
+    "matchedStatuses": ["failed"],
+    "messageRegex": ".*(below expected FPS|throughput regression|performance degradation).*"
+  },
+  {
+    "name": "🧠 Memory / Resource Issues",
+    "description": "Tests that failed due to out-of-memory errors or excessive resource consumption.",
+    "matchedStatuses": ["failed"],
+    "messageRegex": ".*(out of memory|MemoryError|resource exhausted|allocation failed).*"
+  },
+  {
+    "name": "⏱️ Timeout / Deadlock",
+    "description": "Tests that exceeded the allowed runtime or deadlocked under load.",
+    "matchedStatuses": ["failed"],
+    "messageRegex": ".*(timeout|timed out|hung|deadlock|not responding).*"
+  },
+  {
+    "name": "🔧 Infrastructure / Reporting Errors",
+    "description": "Allure, benchmark, or plotting tool issues encountered during reporting.",
+    "matchedStatuses": ["broken"],
+    "traceRegex": ".*(matplotlib|allure|tkinter|plot_gpu_metrics|allure.*generate).*"
+  },
+  {
+    "name": "📊 Benchmark Validation Errors",
+    "description": "Test benchmark results did not meet the defined thresholds.",
+    "matchedStatuses": ["failed"],
+    "messageRegex": ".*(mean.*NoneType|FPS mismatch|expected.*greater|benchmark.*invalid).*"
+  },
+  {
+    "name": "⚡ Stress / Stability Issues",
+    "description": "Stress tests where system became unstable under high computational load.",
+    "matchedStatuses": ["failed"],
+    "messageRegex": ".*(stress.*fail|GPU crash|thermal|system unstable).*"
+  },
+  {
+    "name": "✅ Passed Benchmarks",
+    "description": "All performance tests executed successfully and met expectations.",
+    "matchedStatuses": ["passed"]
   }
 ]

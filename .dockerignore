@@ -11,6 +11,7 @@ __pycache__/
 .bat
 .env/
 .venv/
+.git/
 env/
 venv/
 venv310/
@@ -20,6 +21,7 @@ venv310/
 
 Ignore test results and reports
 allure-results/
+allure-report/
 reports/
 *.log
 *.json

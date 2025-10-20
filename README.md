@@ -117,7 +117,7 @@ gpu_benchmark/
 | `stress` | GPU Stress | Heavy-load GPU endurance tests. |
 | `benchmark` | Performance | FPS, utilization, memory measurement. |
 
-### 🧪 Run Tests Locally  
+### 🧪 Run CMD Tests Locally  
 
 | **Mode** | **Command** |
 |-----------|-------------|

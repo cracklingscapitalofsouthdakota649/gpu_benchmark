@@ -3,6 +3,7 @@ import pytest
 import json
 import allure
 
+@pytest.mark.preprocess
 @pytest.mark.gpu
 @pytest.mark.cpu
 def test_data_preprocessing():
