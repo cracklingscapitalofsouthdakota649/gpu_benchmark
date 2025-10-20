@@ -89,7 +89,7 @@ run_docker.bat
 
 ### 1️⃣ **Interactive Allure Report (Recommended)**  
 ```bash
-cal[ venv310\Scripts\activate
+call venv310\Scripts\activate
 pytest -m gpu --alluredir=allure-results
 allure serve allure-results
 ```
