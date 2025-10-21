@@ -6,20 +6,16 @@ import torch
 import os
 import sys
 
-# Dynamically find project root (directory containing 'supports')
-current_dir = os.path.abspath(os.path.dirname(__file__))
-root_dir = current_dir
+# Add project root if not present
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.append(ROOT_DIR)
 
-# Walk up until we find 'supports/gpu_check.py'
-for _ in range(3):
-    candidate = os.path.join(root_dir, "supports", "gpu_check.py")
-    if os.path.exists(candidate):
-        break
-    root_dir = os.path.abspath(os.path.join(root_dir, os.pardir))
-
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
-
+try:
+    from supports.gpu_check import get_gpu_info
+except ModuleNotFoundError as e:
+    raise ImportError(f"Failed to import gpu_check.py. ROOT_DIR={ROOT_DIR}, sys.path={sys.path}") 
+    
 from supports.gpu_check import get_gpu_info
 
 def get_device(dev_type=None):

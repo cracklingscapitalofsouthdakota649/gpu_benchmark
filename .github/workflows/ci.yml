@@ -210,7 +210,7 @@ jobs:
             margin: 0; /* Aligns the container to the left */
           }
           </style></head><body>
-          <h1>🤖 GPU Benchmarks Simulation CI/CD Build History</h1>
+          <h1>🤖 Robotics TDD Simulation CI/CD Build History</h1>
           <h2>🧩 Latest Allure Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
 
           for OS in ubuntu-latest windows-latest; do
