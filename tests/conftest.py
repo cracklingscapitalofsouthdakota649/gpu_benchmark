@@ -20,13 +20,13 @@ except ImportError:
     pynvml = None
 
 # Get the path to the root of the project (one directory up from 'tests')
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+#PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
 # Prepend the project root to sys.path, guaranteeing module discovery
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+#if PROJECT_ROOT not in sys.path:
+#    sys.path.insert(0, PROJECT_ROOT)
 
-print(f"✅ Conftest: Added project root to sys.path: {PROJECT_ROOT}")
+#print(f"✅ Conftest: Added project root to sys.path: {PROJECT_ROOT}")
 
 # ───────────────────────────────────────────────────────────────
 # 1. GPU Hardware Detection
