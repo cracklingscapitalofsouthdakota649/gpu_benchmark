@@ -66,9 +66,9 @@ jobs:
             echo "🪟 Running tests on Windows..."
           fi
 
-          # 🚀 FINAL FIX: Explicitly set and export PYTHONPATH in the shell script.
-          # This prepends the repository root to the path, ensuring the 'supports' module is found.
-          export PYTHONPATH="${{ github.workspace }}:${PYTHONPATH}"
+          # Explicitly set and export PYTHONPATH with the correct path separator.
+          # This should finally resolve the module path issue on Windows.
+          export PYTHONPATH="${{ github.workspace }}${PATH_SEP}${PYTHONPATH}"
           
           # Run pytest directly on the runner for both OSes
           pytest -v -m gpu --alluredir="$RESULTS_DIR" --import-mode=importlib
