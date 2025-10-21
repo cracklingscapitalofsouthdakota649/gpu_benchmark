@@ -1,1 +1,1 @@
-[{"buildOrder":1,"reportUrl":"${env.BUILD_URL}artifact/${ALLURE_REPORT_DIR}/index.html","data":{"duration":1249856}}]
+[{"buildOrder":2,"reportUrl":"${env.BUILD_URL}artifact/${ALLURE_REPORT_DIR}/index.html","data":{}},{"buildOrder":2,"reportUrl":"${env.BUILD_URL}artifact/${ALLURE_REPORT_DIR}/index.html","data":{}},{"buildOrder":1,"reportUrl":"${env.BUILD_URL}artifact/${ALLURE_REPORT_DIR}/index.html","data":{"duration":1249856}}]

@@ -86,7 +86,7 @@ class TestIOAccelerator:
     # ───────────────────────────────────────────────────────────────
     # 3️. Parallel I/O Accelerator - Threaded Access (Optane Simulation)
     # ───────────────────────────────────────────────────────────────
-@   pytest.mark.io_accelerator
+    @pytest.mark.io_accelerator
     @allure.feature("I/O Accelerator")
     @allure.story("Parallel I/O Throughput (Threaded)")
     def test_parallel_io_throughput(self, test_file, benchmark):

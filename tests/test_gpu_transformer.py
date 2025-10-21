@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import pytest
+import allure
 
 class MiniTransformer(nn.Module):
     def __init__(self, d_model=64, nhead=4, num_layers=2):

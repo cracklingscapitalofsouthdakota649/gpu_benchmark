@@ -23,10 +23,6 @@ jobs:
     runs-on: ubuntu-latest  # ⬅️ Removed 'windows-latest' from matrix
     strategy:
       fail-fast: false
-      matrix:
-        # ⬅️ Removed matrix.os definition
-        # os: [ubuntu-latest, windows-latest]
-        # We now run only on a single, fixed OS (ubuntu-latest)
 
     outputs:
       test_outcome: ${{ steps.run_tests.outputs.test_outcome }}
