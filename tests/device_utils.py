@@ -6,7 +6,7 @@ import torch
 import os
 import sys
 
-from ..supports.gpu_check import get_gpu_info
+from supports.gpu_check import get_gpu_info
     
 def get_device(dev_type=None):
     """
