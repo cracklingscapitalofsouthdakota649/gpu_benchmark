@@ -4,6 +4,14 @@ Helper functions to pick GPU/CPU device for testing.
 """
 
 import torch
+import os
+import sys
+
+# Ensure root path (project folder) is in PYTHONPATH
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from supports.gpu_check import get_gpu_info
 
 def get_device(dev_type=None):
