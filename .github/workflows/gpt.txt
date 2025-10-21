@@ -57,9 +57,6 @@ jobs:
           push: false
           tags: gpu-benchmark:ci-build
           load: true
-          # FIX: Adding a memory/disk limit here is not possible with `load: true` 
-          # but you must fix the space issue inside your Dockerfile 
-          # (e.g., by clearing the pip cache after installing torch).
 
       - name: Run tests
         id: run_tests
@@ -72,15 +69,9 @@ jobs:
 
           if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
             echo "🐳 Running tests in Docker..."
-            # Check if the image exists before running (failsafe against build failure)
-            if docker image inspect gpu-benchmark:ci-build >/dev/null 2>&1; then
-              docker run --rm -v $PWD:/workspace -w /workspace gpu-benchmark:ci-build \
-                pytest -v -m gpu --alluredir="$RESULTS_DIR"
-              TEST_EXIT_CODE=$?
-            else
-              echo "❌ Docker image failed to build. Skipping tests."
-              TEST_EXIT_CODE=1
-            fi
+            docker run --rm -v $PWD:/workspace -w /workspace gpu-benchmark:ci-build \
+              pytest -v -m gpu --alluredir="$RESULTS_DIR"
+            TEST_EXIT_CODE=$?
           else
             echo "🪟 Running tests on Windows..."
             pytest -v -m gpu --alluredir="$RESULTS_DIR"
@@ -104,14 +95,11 @@ jobs:
           fi
 
       - name: Upload Allure Results Artifact
-        if: always() # Ensure upload even on test failure
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-${{ matrix.os }}
           path: allure-results/${{ matrix.os }}
 
-  #-------------------------------------------------------------------------
-  
   report:
     name: Generate Allure Reports & Deploy
     runs-on: ubuntu-latest
@@ -124,10 +112,8 @@ jobs:
       # Fix: Dynamically find the workflow filename.
       - name: Get workflow filename
         id: get_workflow_name
-        # FIX: The expression 'basename .github/workflows/*.yml' may fail if multiple files exist.
-        # It's safer to use the built-in GITHUB_WORKFLOW environment variable which holds the file name.
-        run: echo "WORKFLOW_FILE=${{ github.workflow }}.yml" >> $GITHUB_ENV
-      
+        run: echo "WORKFLOW_FILE=$(basename .github/workflows/*.yml)" >> $GITHUB_ENV
+
       # Fix: Use previous working download artifact method
       - name: Download previous Allure history artifact
         uses: dawidd6/action-download-artifact@v6
@@ -167,12 +153,9 @@ jobs:
           mkdir -p "$SITE_DIR/latest"
 
           for OS in ubuntu-latest windows-latest; do
-            # The uploaded artifact name is allure-results-$OS, not allure-results/allure-results-$OS
             RESULTS_DIR="allure-results/allure-results-$OS"
             REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
             REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
-            
-            # Ensure the results directory exists, even if the artifact was not uploaded/empty
             mkdir -p "$RESULTS_DIR" "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
 
             # Fix: Preserve trend data from previous site
@@ -180,8 +163,7 @@ jobs:
               mkdir -p "$RESULTS_DIR/history"
               cp -r "site/latest/$OS/history/"* "$RESULTS_DIR/history/" || true
             fi
-            
-            # Environment and categories files should be in the root of the results directory
+
             if [ "$OS" == "ubuntu-latest" ]; then
               cp supports/ubuntu.properties "$RESULTS_DIR/environment.properties" 2>/dev/null || true
             else
@@ -191,16 +173,11 @@ jobs:
 
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
             echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$RESULTS_DIR/executor.json"
-            
-            # Only run generate if results exist to prevent an empty history step in Allure
-            if [ -n "$(find $RESULTS_DIR -type f -name '*.json' 2>/dev/null)" ]; then
-              allure generate "$RESULTS_DIR" -o "$REPORT_DIR_BUILD" --clean
-              cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
-              date -u > "$REPORT_DIR_BUILD/build-info.txt"
-              date -u > "$REPORT_DIR_LATEST/build-info.txt"
-            else
-              echo "⚠️ Warning: No test results found for $OS. Skipping report generation."
-            fi
+
+            allure generate "$RESULTS_DIR" -o "$REPORT_DIR_BUILD" --clean
+            cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
+            date -u > "$REPORT_DIR_BUILD/build-info.txt"
+            date -u > "$REPORT_DIR_LATEST/build-info.txt"
           done
 
       - name: Fix Allure Paths
@@ -214,9 +191,6 @@ jobs:
       - name: Rebuild index.html with Trend Charts
         shell: bash
         run: |
-          # Ensure jq is installed for parsing summary.json
-          sudo apt-get install -y jq
-          
           SITE_DIR="site"
           CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
           mkdir -p "$SITE_DIR"
@@ -286,25 +260,18 @@ jobs:
               if [ -f "$SUMMARY_FILE" ]; then
                 PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
                 FAIL_COUNT=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null)
-                # Unstable/Broken tests in Allure are categorized as 'broken' or 'unknown'
-                # The pipeline uses exit code to determine 'UNSTABLE' but chart data must come from Allure's report
                 BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null)
-                SKIPPED_COUNT=$(jq -r '.statistic.skipped // 0' "$SUMMARY_FILE" 2>/dev/null)
-                
+
                 TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
                 TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
-                # Use broken as a proxy for unstable/failed-but-did-not-break-build
-                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT)) 
+                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT))
               fi
             done
             
-            # Only include builds that have any test data
-            if [ $((TOTAL_PASS + TOTAL_FAIL + TOTAL_UNSTABLE)) -gt 0 ]; then
-              LABELS="$LABELS'$BUILD',"
-              PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
-              FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
-              UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
-            fi
+            LABELS="$LABELS'$BUILD',"
+            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
+            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
+            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
           done
 
           # The canvas is correctly wrapped in a controlled div
@@ -320,7 +287,7 @@ jobs:
               datasets: [
                 {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
                 {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
-                {label: 'BROKEN/UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
+                {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
               ]
             },
             options: { 
@@ -330,16 +297,15 @@ jobs:
               scales: { 
                 y: { 
                   beginAtZero: true, 
-                  # FIX: Remove stepSize to allow decimal steps if total is ever a decimal, but keep it for integers if desired
-                  # stepSize: 1, 
-                  # Y-axis title
+                  stepSize: 1,
+                  // Y-axis title
                   title: {
                     display: true,
                     text: 'Total Number of Tests'
                   }
                 },
                 x: {
-                  # X-axis title
+                  // X-axis title
                   title: {
                     display: true,
                     text: 'Build Number'

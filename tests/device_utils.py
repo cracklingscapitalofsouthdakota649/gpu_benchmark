@@ -2,21 +2,32 @@
 """
 Helper functions to pick GPU/CPU device for testing.
 """
-import torch
 import os
 import sys
+import torch
 
-# Add project root if not present
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT_DIR not in sys.path:
-    sys.path.append(ROOT_DIR)
+# Dynamically ensure project root is importable
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
+# Attempt to import get_gpu_info safely, with cross-platform fallback
 try:
     from supports.gpu_check import get_gpu_info
 except ModuleNotFoundError as e:
-    raise ImportError(f"Failed to import gpu_check.py. ROOT_DIR={ROOT_DIR}, sys.path={sys.path}") 
-    
-from supports.gpu_check import get_gpu_info
+    print(f"⚠️ Import warning: {e}. Attempting fallback import...")
+    # Add 'supports' explicitly if it isn't being resolved as a package
+    SUPPORTS_DIR = os.path.join(PROJECT_ROOT, "supports")
+    if SUPPORTS_DIR not in sys.path:
+        sys.path.insert(0, SUPPORTS_DIR)
+    try:
+        from gpu_check import get_gpu_info
+    except ModuleNotFoundError as e2:
+        raise ImportError(
+            f"❌ Failed to import gpu_check.py even after adjusting sys.path.\n"
+            f"PROJECT_ROOT={PROJECT_ROOT}\nSUPPORTS_DIR={SUPPORTS_DIR}\n"
+            f"sys.path={sys.path}\nError: {e2}"
+        )
 
 def get_device(dev_type=None):
     """
