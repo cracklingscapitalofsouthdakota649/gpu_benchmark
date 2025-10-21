@@ -49,18 +49,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 🚀 FIX: Set PYTHONPATH to the root directory ($GITHUB_WORKSPACE) 
-      # This tells Python to treat the repo root as a source path,
-      # allowing imports like 'from supports.gpu_check import...' to work.
-      - name: Set PYTHONPATH for module discovery
-        shell: bash
-        run: |
-          echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+      # REMOVED: The 'Build Docker Image' step has been removed.
 
       - name: Run tests
         id: run_tests
-        # Use bash shell for cross-platform consistency in script logic
         shell: bash
+        # 🚀 FIX: Set PYTHONPATH directly on this step to guarantee Pytest finds 'supports' module.
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           set +e
           OS_NAME=${{ matrix.os }}
@@ -68,7 +64,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
 
           if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
-            echo "🐧 Running tests on Ubuntu..."
+            echo "🐧 Running tests on Ubuntu (Direct Runner)..."
           else
             echo "🪟 Running tests on Windows..."
           fi
@@ -110,12 +106,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Fix: Dynamically find the workflow filename.
       - name: Get workflow filename
         id: get_workflow_name
         run: echo "WORKFLOW_FILE=${{ github.workflow }}.yml" >> $GITHUB_ENV
 
-      # Fix: Use previous working download artifact method
       - name: Download previous Allure history artifact
         uses: dawidd6/action-download-artifact@v6
         with:
@@ -130,7 +124,6 @@ jobs:
           mkdir -p "${{ env.SITE_DIR }}"
           if [ -d "previous-site" ]; then
             echo "♻️ Restoring previous site history..."
-            # Restore all previous builds and the latest report history folders
             cp -r previous-site/* "${{ env.SITE_DIR }}/" || true
           fi
 
@@ -149,7 +142,6 @@ jobs:
       - name: Generate Allure Reports Per OS
         shell: bash
         run: |
-          sudo apt-get install -y jq # Ensure jq is installed
           SITE_DIR="site"
           BUILD_NUMBER=${{ github.run_number }}
           mkdir -p "$SITE_DIR/latest"
@@ -158,16 +150,14 @@ jobs:
             RESULTS_DIR="allure-results/allure-results-$OS"
             REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
             REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
-            
             mkdir -p "$RESULTS_DIR" "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
 
-            # Fix: Preserve trend data from previous site
+            # Preserve trend data from previous site
             if [ -d "site/latest/$OS/history" ]; then
               mkdir -p "$RESULTS_DIR/history"
               cp -r "site/latest/$OS/history/"* "$RESULTS_DIR/history/" || true
             fi
-            
-            # Environment and categories files should be in the root of the results directory
+
             if [ "$OS" == "ubuntu-latest" ]; then
               cp supports/ubuntu.properties "$RESULTS_DIR/environment.properties" 2>/dev/null || true
             else
@@ -177,8 +167,7 @@ jobs:
 
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
             echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$RESULTS_DIR/executor.json"
-            
-            # Only run generate if results exist
+
             if [ -n "$(find $RESULTS_DIR -type f -name '*.json' 2>/dev/null)" ]; then
               allure generate "$RESULTS_DIR" -o "$REPORT_DIR_BUILD" --clean
               cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
@@ -200,6 +189,7 @@ jobs:
       - name: Rebuild index.html with Trend Charts
         shell: bash
         run: |
+          sudo apt-get install -y jq # Ensure jq is installed
           SITE_DIR="site"
           CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
           mkdir -p "$SITE_DIR"
@@ -212,11 +202,10 @@ jobs:
           li{margin:6px 0;}
           a{text-decoration:none;color:#0366d6;}
           a:hover{text-decoration:underline;}
-          /* FIX: CSS to control the chart container's size and align left */
           #chart-container {
             max-width: 600px;
             max-height: 300px;
-            margin: 0; /* Aligns the container to the left */
+            margin: 0;
           }
           </style></head><body>
           <h1>🤖 GPU Benchmarks CI/CD Build History</h1>
@@ -225,7 +214,6 @@ jobs:
           for OS in ubuntu-latest windows-latest; do
             if [ -d "$SITE_DIR/latest/$OS" ]; then
               TS_UTC=$(cat "$SITE_DIR/latest/$OS/build-info.txt" 2>/dev/null || echo "")
-              # Using '+%a %b %d %H:%M:%S PDT %Y' to explicitly show PDT/PST
               TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS_UTC")
               echo "<li><strong><a href='latest/$OS/'>Latest Report ($OS)</a></strong> - Last run: $TS_DISPLAY</li>" >> "$SITE_DIR/index.html"
             else
@@ -234,30 +222,22 @@ jobs:
           done
 
           echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2>" >> "$SITE_DIR/index.html"
-          # Fix: Sort builds newest to oldest for the list
           BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
           
           echo "<ul>" >> "$SITE_DIR/index.html"
-          # Data for chart needs to be in ascending order (oldest to newest)
           CHART_BUILDS=$(echo "$BUILDS" | sort -n)
           LABELS=""
           PASS_COUNTS=""
           FAIL_COUNTS=""
           UNSTABLE_COUNTS=""
 
-          # Generate the visible list of links (newest to oldest)
           for BUILD in $BUILDS; do
-            # Get the UTC time from the Ubuntu build info file and convert it
             TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
             TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
-
-            # ✅ FIX: Added date and time in PDT to the build list item
             echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/'>Ubuntu</a> / <a href='${BUILD}/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
           done
           echo "</ul>" >> "$SITE_DIR/index.html"
 
-          # Gather data for the chart (oldest to newest)
-          # Fix: Reads actual test statistics from Allure's summary.json
           for BUILD in $CHART_BUILDS; do
             TOTAL_PASS=0
             TOTAL_FAIL=0   
@@ -270,14 +250,13 @@ jobs:
                 PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
                 FAIL_COUNT=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null)
                 BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null)
-                
+
                 TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
                 TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
-                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT)) 
+                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT))
               fi
             done
             
-            # Only include builds that have any test data
             if [ $((TOTAL_PASS + TOTAL_FAIL + TOTAL_UNSTABLE)) -gt 0 ]; then
               LABELS="$LABELS'$BUILD',"
               PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
@@ -286,7 +265,6 @@ jobs:
             fi
           done
 
-          # The canvas is correctly wrapped in a controlled div
           echo "<div id='chart-container'>
           <canvas id='trendChart'></canvas>
           </div>
@@ -299,7 +277,7 @@ jobs:
               datasets: [
                 {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
                 {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
-                {label: 'BROKEN/UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
+                {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
               ]
             },
             options: { 
@@ -309,16 +287,10 @@ jobs:
               scales: { 
                 y: { 
                   beginAtZero: true, 
-                  title: {
-                    display: true,
-                    text: 'Total Number of Tests'
-                  }
+                  title: { display: true, text: 'Total Number of Tests' }
                 },
                 x: {
-                  title: {
-                    display: true,
-                    text: 'Build Number'
-                  }
+                  title: { display: true, text: 'Build Number' }
                 }
               } 
             }
