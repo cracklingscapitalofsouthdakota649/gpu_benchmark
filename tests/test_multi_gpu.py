@@ -133,8 +133,8 @@ def test_cuml_linear_regression():
 # --------------------------------------------------------------------
 # 5. CuPy Vectorized Computation (NumPy on GPU)
 # --------------------------------------------------------------------
-@allure.feature("CuPy")
-@allure.story("Vectorized GPU Computations")
+@allure.feature("Python GPU Libraries") 
+@allure.story("CuPy Vectorized Operations") 
 @pytest.mark.gpu
 @pytest.mark.accelerator
 @pytest.mark.benchmark
@@ -160,8 +160,8 @@ def test_cupy_vectorized_ops():
 # --------------------------------------------------------------------
 # 6. TensorFlow Multi-GPU Training Simulation
 # --------------------------------------------------------------------
-@allure.feature("TensorFlow")
-@allure.story("Multi-GPU Training Benchmark")
+@allure.feature("TensorFlow Distributed")
+@allure.story("Multi-GPU Training Simulation")
 @pytest.mark.gpu
 @pytest.mark.accelerator
 @pytest.mark.benchmark

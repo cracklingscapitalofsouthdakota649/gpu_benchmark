@@ -24,6 +24,8 @@ def worker(thread_id, results, lock, metrics_monitor, dev_type, device):
         time.sleep(0.1)
 
 
+@allure.feature("System Parallelism") # ⬅️ ADDED
+@allure.story("Multi-Threaded Load Test") # ⬅️ ADDED
 @pytest.mark.gpu
 @pytest.mark.cpu
 @pytest.mark.benchmark

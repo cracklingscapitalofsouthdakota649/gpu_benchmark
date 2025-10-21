@@ -1,7 +1,10 @@
 # tests/test_gpu_mixed_precision.py
 import torch
 import pytest
+import allure # Import allure is generally good practice when using decorators
 
+@allure.feature("GPU Specialized Performance")  # ⬅️ ADDED
+@allure.story("Mixed Precision Matrix Multiplication") # ⬅️ ADDED
 @pytest.mark.gpu
 def test_mixed_precision_matmul(benchmark):
     """Benchmark matrix multiplication using mixed precision."""

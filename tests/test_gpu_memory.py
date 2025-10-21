@@ -2,7 +2,10 @@
 import torch
 import pytest
 import psutil
+import allure # Import allure is generally good practice when using decorators
 
+@allure.feature("GPU Resource Management")      # ⬅️ ADDED
+@allure.story("Memory Allocation and Cleanup")  # ⬅️ ADDED
 @pytest.mark.gpu
 def test_gpu_memory_allocation():
     """Validate GPU memory allocation and cleanup."""

@@ -3,7 +3,10 @@
 import torch
 import torch.nn as nn
 import pytest
+import allure # Import allure is generally good practice when using decorators
 
+@allure.feature("GPU Deep Learning Workloads") # ⬅️ ADDED
+@allure.story("Convolutional Network Forward Pass") # ⬅️ ADDED
 @pytest.mark.gpu
 def test_convnet_forward_pass(benchmark):
     """Benchmark simple CNN forward pass."""

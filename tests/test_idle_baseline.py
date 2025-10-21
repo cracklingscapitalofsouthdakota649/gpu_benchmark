@@ -8,6 +8,8 @@ from scripts.plot_gpu_metrics import attach_chart_to_allure
 from scripts.system_metrics import SystemMetrics
 from tests.device_utils import pick_device, get_device
 
+@allure.feature("System Resource Monitoring") # ⬅️ ADDED
+@allure.story("Idle System Baseline Metrics") # ⬅️ ADDED
 @pytest.mark.gpu
 @pytest.mark.cpu
 def test_idle_baseline():

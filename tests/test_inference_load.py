@@ -12,6 +12,8 @@ from tests.device_utils import pick_device, get_device, synchronize
 
 RESULTS_DIR = "allure-results"
 
+@allure.feature("GPU Deep Learning Workloads")  # ⬅️ ADDED
+@allure.story("Model Inference Steady-State")  # ⬅️ ADDED
 @pytest.mark.gpu
 @pytest.mark.cpu
 @pytest.mark.benchmark

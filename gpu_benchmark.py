@@ -10,7 +10,6 @@ import json
 # -----------------------
 # Configuration
 # -----------------------
-VENV_DIR = "venv310"
 ALLURE_RESULTS = "allure-results"
 ALLURE_REPORT = "allure-report"
 SUPPORT_DIR = "supports"
@@ -27,7 +26,8 @@ COMMON_PACKAGES = [
 TORCH_PACKAGES = {
     "cuda": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
     "rocm": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
-    "intel": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
+    "intel_opencl": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
+    "intel_xpu": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
     "directml": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
     "cpu": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
 }
@@ -36,7 +36,7 @@ TORCH_PACKAGES = {
 # Utilities
 # -----------------------
 def run_cmd(cmd, check=True):
-    """Run a command. On Windows, resolve allure.cmd if needed."""
+    """Run a command, resolving allure.cmd if needed on Windows."""
     if platform.system().lower() == "windows" and cmd[0] == "allure":
         allure_path = shutil.which("allure")
         if allure_path is None:
@@ -48,53 +48,75 @@ def run_cmd(cmd, check=True):
         return subprocess.run(cmd, check=check)
 
 
-def create_venv():
-    if not os.path.exists(VENV_DIR):
-        print(f"[INFO] Creating virtual environment: {VENV_DIR}")
-        venv.create(VENV_DIR, with_pip=True)
-    else:
-        print(f"[INFO] Using existing virtual environment: {VENV_DIR}")
-
-
+# -----------------------
+# GPU Detection
+# -----------------------
 def detect_gpu_flavor():
-    """Detect GPU flavor"""
+    """Detect CUDA, ROCm, Intel XPU/OpenCL, or fallback to CPU."""
     try:
-        ret = subprocess.run(
-            [sys.executable, os.path.join(SUPPORT_DIR, "gpu_check.py")],
-            capture_output=True,
-            text=True,
-        )
-        if ret.returncode != 0:
-            print(f"[WARN] gpu_check.py error: {ret.stderr.strip()}")
-            return "cpu"
-        info = ret.stdout.strip()
-        if not info:
-            print(f"[WARN] gpu_check.py returned no output")
-            return "cpu"
-        data = json.loads(info)
-        summary = data.get("summary", {})
-        if summary.get("cuda"):
-            return "cuda"
-        elif summary.get("rocm"):
-            return "rocm"
-        elif summary.get("directml"):
-            return "directml"
-        elif summary.get("opencl_gpu_devices", 0) > 0:
-            return "intel"
-        else:
-            return "cpu"
+        # Try running supports/gpu_check.py if available
+        if os.path.exists(os.path.join(SUPPORT_DIR, "gpu_check.py")):
+            ret = subprocess.run(
+                [sys.executable, os.path.join(SUPPORT_DIR, "gpu_check.py")],
+                capture_output=True, text=True
+            )
+            if ret.returncode == 0:
+                data = json.loads(ret.stdout.strip())
+                summary = data.get("summary", {})
+                if summary.get("cuda"):
+                    return "cuda"
+                elif summary.get("rocm"):
+                    return "rocm"
+                elif summary.get("directml"):
+                    return "directml"
+                elif summary.get("intel_gpu") or summary.get("opencl_gpu_devices", 0) > 0:
+                    return "intel_opencl"
+                else:
+                    return "cpu"
     except Exception as e:
-        print(f"[WARN] Failed to detect GPU: {e}")
-        return "cpu"
+        print(f"[WARN] gpu_check.py failed: {e}")
+
+    # Fallback detection without gpu_check.py
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            return "intel_xpu"
+    except Exception:
+        pass
+
+    # OpenCL check
+    try:
+        import pyopencl as cl
+        platforms = cl.get_platforms()
+        if any("Intel" in d.name for p in platforms for d in p.get_devices()):
+            return "intel_opencl"
+    except Exception:
+        pass
+
+    return "cpu"
 
 
-def install_packages(pip_exe, packages):
+# -----------------------
+# Package Installation
+# -----------------------
+def install_packages(packages):
+    python_exec = sys.executable
     for pkg in packages:
-        run_cmd([pip_exe, "install", "--no-deps", pkg])
+        print(f"[INFO] Installing {pkg}")
+        subprocess.run(
+            f'"{python_exec}" -m pip install --no-deps -q {pkg}',
+            shell=True,
+            check=False
+        )
 
 
+# -----------------------
+# Allure & Reporting
+# -----------------------
 def update_executor_json(build_number):
-    """Dynamically update executor.json for each run"""
+    """Dynamically update executor.json for each run."""
     executor_template = os.path.join(SUPPORT_DIR, "executor.json")
     if not os.path.exists(executor_template):
         print("[WARN] executor.json template missing; skipping update.")
@@ -104,9 +126,7 @@ def update_executor_json(build_number):
 
     data["buildOrder"] = str(build_number)
     data["buildName"] = f"GPU Benchmark #{build_number}"
-    data["description"] = (
-        f"Benchmark suite for GPU performance testing (Build {build_number})"
-    )
+    data["description"] = f"Benchmark suite for GPU performance testing (Build {build_number})"
 
     dest = os.path.join(ALLURE_RESULTS, str(build_number), "executor.json")
     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -116,9 +136,9 @@ def update_executor_json(build_number):
 
 
 def copy_support_files(dest_dir):
-    """Copy categories, executor, environment.properties"""
     shutil.copy(os.path.join(SUPPORT_DIR, "categories.json"), dest_dir)
     print("[INFO] Copied categories.json to allure-results/")
+
     shutil.copy(os.path.join(SUPPORT_DIR, "executor.json"), dest_dir)
     print("[INFO] Copied executor.json to allure-results/")
 
@@ -130,32 +150,20 @@ def copy_support_files(dest_dir):
     print(f"[INFO] Copied {env_file} as environment.properties")
 
 
-# -----------------------
-# Trend Support
-# -----------------------
 def copy_history(build_number):
-    """Pull previous run's history into this build"""
     latest_dir = os.path.join(ALLURE_RESULTS, "latest")
     history_src = os.path.join(latest_dir, "history")
     history_dest = os.path.join(ALLURE_RESULTS, str(build_number), "history")
 
     if os.path.exists(history_src):
         shutil.copytree(history_src, history_dest, dirs_exist_ok=True)
-        print(f"[INFO] Imported trend history from previous run into build {build_number}")
+        print(f"[INFO] Imported trend history into build {build_number}")
     else:
         os.makedirs(history_dest, exist_ok=True)
-        history_json = {
-            "reportName": f"GPU Benchmark Build {build_number}",
-            "statistic": {"passed": 0, "failed": 0, "broken": 0, "skipped": 0, "unknown": 0},
-            "time": {"start": int(datetime.datetime.now().timestamp() * 1000)},
-        }
-        with open(os.path.join(history_dest, "history.json"), "w", encoding="utf-8") as f:
-            json.dump(history_json, f, indent=2)
-        print(f"[INFO] Initialized new history for first trend run (build {build_number})")
+        print(f"[INFO] Initialized new history for build {build_number}")
 
 
 def save_latest(build_number):
-    """Save current results and update 'latest' including new history"""
     latest_dir = os.path.join(ALLURE_RESULTS, "latest")
     build_dir = os.path.join(ALLURE_RESULTS, str(build_number))
     report_history = os.path.join(ALLURE_REPORT, "history")
@@ -166,42 +174,37 @@ def save_latest(build_number):
 
     if os.path.exists(report_history):
         shutil.copytree(report_history, os.path.join(latest_dir, "history"), dirs_exist_ok=True)
-        print("[INFO] Captured updated history from Allure report for next trend.")
+        print("[INFO] Captured updated history from Allure report.")
     else:
-        print("[WARN] No history found in report; trend may be incomplete.")
+        print("[WARN] No history found in report.")
 
     print("[INFO] Updated latest results for next trend comparison")
 
 
 def generate_allure_report(results_dir):
-    """Generate Allure report"""
     print("[INFO] Generating Allure report...")
     run_cmd(["allure", "generate", results_dir, "-o", ALLURE_REPORT, "--clean"], check=False)
     print("[INFO] Report successfully generated to allure-report")
 
 
 def open_allure_report():
-    """Open the generated Allure report in a browser"""
-    print("Starting web server to open report...")
-
-    # Use the same logic from run_cmd to find allure path on Windows
+    print("Starting Allure web server...")
     allure_cmd = "allure"
     shell_required = False
     if platform.system().lower() == "windows":
         allure_path = shutil.which("allure")
         if allure_path:
             allure_cmd = allure_path
-            shell_required = True  # .cmd files often require shell=True
+            shell_required = True
         else:
             print("[ERROR] Allure not found in PATH.")
             sys.exit(1)
-
     try:
         process = subprocess.Popen([allure_cmd, "open", ALLURE_REPORT], shell=shell_required)
-        print("Server started. Press <Ctrl+C> in this terminal to stop the server and exit.")
+        print("Server started. Press <Ctrl+C> to stop.")
         process.wait()
     except KeyboardInterrupt:
-        print("\n[INFO] Server stopped by user (Ctrl+C). Exiting gracefully...")
+        print("\n[INFO] Server stopped by user.")
         try:
             process.terminate()
         except Exception:
@@ -209,7 +212,6 @@ def open_allure_report():
         sys.exit(0)
     except Exception as e:
         print(f"[ERROR] Failed to open Allure report: {e}")
-        print("Please open the report manually by running: allure open allure-report")
 
 
 # -----------------------
@@ -223,15 +225,11 @@ def main():
     build_number = sys.argv[1]
     suite = sys.argv[2] if len(sys.argv) > 2 else None
 
-    create_venv()
-    pip_exe = os.path.join(VENV_DIR, "Scripts", "pip.exe")
-    python_exe = os.path.join(VENV_DIR, "Scripts", "python.exe")
-
     flavor = detect_gpu_flavor()
     print(f"[INFO] Detected GPU flavor: {flavor}")
 
-    install_packages(pip_exe, COMMON_PACKAGES)
-    install_packages(pip_exe, TORCH_PACKAGES.get(flavor, TORCH_PACKAGES["cpu"]))
+    install_packages(COMMON_PACKAGES)
+    install_packages(TORCH_PACKAGES.get(flavor, TORCH_PACKAGES["cpu"]))
 
     results_dir = os.path.join(ALLURE_RESULTS, str(build_number))
     os.makedirs(results_dir, exist_ok=True)
@@ -240,24 +238,16 @@ def main():
     copy_support_files(results_dir)
     update_executor_json(build_number)
 
-    pytest_cmd = [python_exe, "-m", "pytest", "-v", "--alluredir", results_dir]
+    pytest_cmd = [sys.executable, "-m", "pytest", "-v", "--alluredir", results_dir]
     if suite:
         pytest_cmd.extend(["-m", suite])
-    
-    # --- FIX START ---
-    # Call run_cmd with check=False so it doesn't fail on non-zero exit code (i.e., test failures).
+
     print("[INFO] Running pytest benchmark...")
     run_cmd(pytest_cmd, check=False)
     print("[INFO] Pytest run completed.")
-    # --- FIX END ---
 
-    # 1. Generate the report
     generate_allure_report(results_dir)
-    
-    # 2. Save the new history *before* opening the report
     save_latest(build_number)
-    
-    # 3. Now, open the report for viewing
     open_allure_report()
 
 

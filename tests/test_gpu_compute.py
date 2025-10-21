@@ -2,7 +2,10 @@
 import torch
 import pytest
 import time
+import allure # Import allure is generally good practice when using decorators
 
+@allure.feature("GPU Core Compute Benchmarks")  # ⬅️ ADDED
+@allure.story("Tensor Arithmetic Operations")   # ⬅️ ADDED
 @pytest.mark.gpu
 def test_tensor_operations_benchmark(benchmark):
     """Benchmark GPU tensor arithmetic (element-wise ops)."""

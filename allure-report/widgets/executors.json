@@ -1,1 +1,1 @@
-[{"name":"GPU Benchmark Executor","type":"CI_Pipeline","url":"${env.JENKINS_URL}","buildOrder":3,"buildName":"GPU Benchmark #3","buildUrl":"${env.BUILD_URL}","reportUrl":"${env.BUILD_URL}artifact/${ALLURE_REPORT_DIR}/index.html"}]
+[{"name":"GPU Benchmark Executor","type":"CI_Pipeline","url":"${env.JENKINS_URL}","buildOrder":1,"buildName":"GPU Benchmark #1","buildUrl":"${env.BUILD_URL}","reportUrl":"${env.BUILD_URL}artifact/${ALLURE_REPORT_DIR}/index.html"}]

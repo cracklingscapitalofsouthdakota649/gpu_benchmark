@@ -12,6 +12,8 @@ from tests.device_utils import pick_device, get_device, synchronize
 
 RESULTS_DIR = "allure-results"
 
+@allure.feature("GPU Stability and Stress Testing") # ⬅️ ADDED
+@allure.story("Sustained Compute Stress Test")      # ⬅️ ADDED
 @pytest.mark.gpu
 @pytest.mark.cpu
 @pytest.mark.stress

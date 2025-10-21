@@ -86,9 +86,9 @@ class TestIOAccelerator:
     # ───────────────────────────────────────────────────────────────
     # 3️. Parallel I/O Accelerator - Threaded Access (Optane Simulation)
     # ───────────────────────────────────────────────────────────────
-    @pytest.mark.io_accelerator
+@   pytest.mark.io_accelerator
     @allure.feature("I/O Accelerator")
-    @allure.story("Async I/O Pipeline")
+    @allure.story("Parallel I/O Throughput (Threaded)")
     def test_parallel_io_throughput(self, test_file, benchmark):
         """Multi-threaded read simulation (Optane / PCIe Gen5)."""
         block_size = BLOCK_SIZE
@@ -115,7 +115,7 @@ class TestIOAccelerator:
     # ───────────────────────────────────────────────────────────────
     @pytest.mark.io_accelerator
     @allure.feature("I/O Accelerator")
-    @allure.story("Async I/O Simulation")
+    @allure.story("Metadata Operation Latency (File Create/Delete)")
     def test_async_io_pipeline(self, test_file, benchmark): # <-- FIX: Removed 'async'
         """Emulate async file pipeline (GPUDirect Storage)."""
         chunk_size = 8 * 1024 * 1024

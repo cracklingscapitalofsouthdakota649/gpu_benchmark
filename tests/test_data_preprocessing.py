@@ -3,6 +3,8 @@ import pytest
 import json
 import allure
 
+@allure.feature("Data Pipeline Benchmarks") # ⬅️ ADDED
+@allure.story("Simple CPU Data Preprocessing") # ⬅️ ADDED
 @pytest.mark.preprocess
 @pytest.mark.gpu
 @pytest.mark.cpu

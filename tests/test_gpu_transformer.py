@@ -13,6 +13,8 @@ class MiniTransformer(nn.Module):
     def forward(self, src):
         return self.encoder(src)
 
+@allure.feature("GPU Deep Learning Workloads") # ⬅️ ADDED
+@allure.story("Transformer Encoder Inference") # ⬅️ ADDED
 @pytest.mark.gpu
 def test_transformer_inference(benchmark):
     """Benchmark transformer encoder inference on GPU."""

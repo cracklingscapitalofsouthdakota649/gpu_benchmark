@@ -69,8 +69,11 @@ class TestNetworkIOAccelerator:
         return data
 
     # ───────────────────────────────────────────────────────────────
-    # 1️⃣ RDMA Latency + Throughput Test
+    # 1️. RDMA Latency + Throughput Test
     # ───────────────────────────────────────────────────────────────
+    @pytest.mark.network_io_accelerator
+    @allure.feature("Network I/O Accelerator")
+    @allure.story("RDMA Latency + Throughput Test")
     def test_rdma_throughput_latency(self, hardware_info, benchmark):
         if not hardware_info["rdma"]:
             pytest.skip("RDMA-capable NIC not detected.")
@@ -92,8 +95,11 @@ class TestNetworkIOAccelerator:
         assert elapsed < 0.5  # Expect sub-ms latency in RDMA-capable NICs
 
     # ───────────────────────────────────────────────────────────────
-    # 2️⃣ NVMe-over-Fabrics File I/O Simulation
+    # 2️. NVMe-over-Fabrics File I/O Simulation
     # ───────────────────────────────────────────────────────────────
+    @pytest.mark.network_io_accelerator
+    @allure.feature("Network I/O Accelerator")
+    @allure.story("NVMe-over-Fabrics File I/O Simulation")
     def test_nvme_of_file_io(self, hardware_info, benchmark):
         if not hardware_info["nvme_of"]:
             pytest.skip("NVMe-over-Fabrics target not detected.")
@@ -116,8 +122,11 @@ class TestNetworkIOAccelerator:
         assert result is not None
 
     # ───────────────────────────────────────────────────────────────
-    # 3️⃣ Parallel iSCSI I/O Test
+    # 3️. Parallel iSCSI I/O Test
     # ───────────────────────────────────────────────────────────────
+    @pytest.mark.network_io_accelerator
+    @allure.feature("Network I/O Accelerator")
+    @allure.story("Parallel iSCSI I/O Test")
     def test_parallel_iscsi_io(self, hardware_info, benchmark, payload):
         if not hardware_info["iscsi"]:
             pytest.skip("No iSCSI targets available.")
@@ -135,8 +144,11 @@ class TestNetworkIOAccelerator:
         assert result is not None
 
     # ───────────────────────────────────────────────────────────────
-    # 4️⃣ Network I/O Round-Trip Latency Test (SMB Direct)
+    # 4️. Network I/O Round-Trip Latency Test (SMB Direct)
     # ───────────────────────────────────────────────────────────────
+    @pytest.mark.network_io_accelerator
+    @allure.feature("Network I/O Accelerator")
+    @allure.story("Round-Trip Latency Test (SMB Direct)")
     @pytest.mark.asyncio
     async def test_smb_direct_latency(self, benchmark):
         """Measure async TCP I/O round-trip time to simulate SMB Direct."""
@@ -159,8 +171,12 @@ class TestNetworkIOAccelerator:
         assert result < 5.0  # Expect low latency
 
     # ───────────────────────────────────────────────────────────────
-    # 5️⃣ Network I/O Stability Over Time
+    # 5️. Network I/O Stability Over Time
     # ───────────────────────────────────────────────────────────────
+    @pytest.mark.network_io_accelerator
+    @allure.feature("Network I/O Accelerator")
+    @allure.story("Stability Over Time")
+    @pytest.mark.asyncio
     def test_network_stability(self, benchmark):
         """Run repeated ping over 30 seconds and track packet loss."""
         host = "8.8.8.8"

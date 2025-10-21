@@ -1,7 +1,10 @@
 # tests/test_cpu_reference.py
 import torch
 import pytest
+import allure # Import allure is generally good practice when using decorators
 
+@allure.feature("System Baseline Benchmarks")   # ⬅️ ADDED
+@allure.story("CPU Matrix Multiplication Reference") # ⬅️ ADDED
 @pytest.mark.cpu
 def test_cpu_reference_operations(benchmark):
     """Compare CPU baseline to GPU performance."""
