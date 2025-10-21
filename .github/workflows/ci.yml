@@ -76,8 +76,8 @@ jobs:
             fi
             
             # Run Pytest
-            #pytest -v --alluredir="$RESULTS_DIR" --import-mode=importlib
-            pytest -v tests/test_io_accelerator.py --alluredir="$RESULTS_DIR" --import-mode=importlib
+            pytest -v --alluredir="$RESULTS_DIR" --import-mode=importlib
+            #pytest -v tests/test_io_accelerator.py --alluredir="$RESULTS_DIR" --import-mode=importlib
             TEST_EXIT_CODE=$?
             
             # 1. Check if results directory exists and has files (most critical check)
@@ -150,7 +150,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v6
         with:
           # Use the actual filename if it's constant, or a safer way to get it
-          workflow: ${{ github.workflow }}.yml 
+          workflow: ci.yml 
           branch: main
           name: allure-history
           path: ${{ env.SITE_DIR }} # Download directly to SITE_DIR to simplify restoration
