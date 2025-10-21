@@ -68,7 +68,7 @@ jobs:
 
           # Explicitly set and export PYTHONPATH with the correct path separator.
           # This should finally resolve the module path issue on Windows.
-          export PYTHONPATH="${{ github.workspace }}${PATH_SEP}${PYTHONPATH}"
+          # export PYTHONPATH="${{ github.workspace }}${PATH_SEP}${PYTHONPATH}"
           
           # Run pytest directly on the runner for both OSes
           pytest -v -m gpu --alluredir="$RESULTS_DIR" --import-mode=importlib
