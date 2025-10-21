@@ -3,11 +3,22 @@
 Helper functions to pick GPU/CPU device for testing.
 """
 import torch
-# Standard import:
-# This relies on the CI/environment configuration (PYTHONPATH) 
-# to make the 'supports' directory discoverable from the project root.
-from supports.gpu_check import get_gpu_info
+import os
+import sys
 
+# --- Ensure repo root (project folder) is in sys.path ---
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+try:
+    from supports.gpu_check import get_gpu_info
+except ModuleNotFoundError:
+    # If still missing, print detailed diagnostic and re-raise
+    print(f"[DEBUG] Import failed. ROOT_DIR={ROOT_DIR}")
+    print(f"[DEBUG] sys.path={sys.path}")
+    raise
+    
 def get_device(dev_type=None):
     """
     Return a PyTorch device based on available hardware or requested type.
