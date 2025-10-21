@@ -61,17 +61,18 @@ jobs:
           mkdir -p "$RESULTS_DIR"
 
           if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
+            PATH_SEP=":"
             echo "🐧 Running tests on Ubuntu (Direct Runner)..."
           else
+            PATH_SEP=";"
             echo "🪟 Running tests on Windows..."
           fi
 
-          # Explicitly set and export PYTHONPATH with the correct path separator.
-          # This should finally resolve the module path issue on Windows.
-          # export PYTHONPATH="${{ github.workspace }}${PATH_SEP}${PYTHONPATH}"
+          export PYTHONPATH="${{ github.workspace }}${PATH_SEP}${PYTHONPATH}"
           
           # Run pytest directly on the runner for both OSes
           pytest -v -m gpu --alluredir="$RESULTS_DIR" --import-mode=importlib
+          #pytest -v -m gpu --alluredir="$RESULTS_DIR"
           TEST_EXIT_CODE=$?
 
           if [ ! -d "$RESULTS_DIR" ] || [ -z "$(find $RESULTS_DIR -type f -name '*.json' 2>/dev/null)" ]; then
