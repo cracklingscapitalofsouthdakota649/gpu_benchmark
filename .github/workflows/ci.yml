@@ -49,15 +49,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build Docker Image
-        if: matrix.os == 'ubuntu-latest'
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          tags: gpu-benchmark:ci-build
-          load: true
-
       - name: Run tests
         id: run_tests
         shell: bash

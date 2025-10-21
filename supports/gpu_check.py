@@ -1,5 +1,5 @@
-# supports/gpu_check.py
 """
+# supports/gpu_check.py
 Cross-platform GPU capability detection for tests.
 
 Returns a dict shaped like:
@@ -15,8 +15,6 @@ Returns a dict shaped like:
   }
 }
 """
-
-# supports/gpu_check.py
 import json
 import subprocess
 
