@@ -47,7 +47,7 @@ jobs:
         with:
           context: .
           push: false
-          tags: robotics-tdd:ci-build
+          tags: gpu-benchmark:ci-build
           load: true
 
       - name: Run tests
