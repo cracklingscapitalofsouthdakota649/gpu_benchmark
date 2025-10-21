@@ -71,7 +71,7 @@ jobs:
           export PYTHONPATH="${{ github.workspace }}:${PYTHONPATH}"
           
           # Run pytest directly on the runner for both OSes
-          pytest -v -m gpu --alluredir="$RESULTS_DIR"
+          pytest -v -m gpu --alluredir="$RESULTS_DIR" --import-mode=importlib
           TEST_EXIT_CODE=$?
 
           if [ ! -d "$RESULTS_DIR" ] || [ -z "$(find $RESULTS_DIR -type f -name '*.json' 2>/dev/null)" ]; then
