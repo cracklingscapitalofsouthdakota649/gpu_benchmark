@@ -55,40 +55,56 @@ jobs:
         id: run_tests
         shell: bash
         run: |
-          set +e
-          OS_NAME=${{ matrix.os }}
-          RESULTS_DIR="allure-results/$OS_NAME"
-          mkdir -p "$RESULTS_DIR"
+            set +e
+            OS_NAME=${{ matrix.os }}
+            RESULTS_DIR="allure-results/$OS_NAME"
+            mkdir -p "$RESULTS_DIR"
+            if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
+              PATH_SEP=":"
+              echo "🐧 Running tests on Ubuntu (Direct Runner)..."
+            else
+              PATH_SEP=";"
+              echo "🦾 Running tests on Windows..."
+            fi
+            cd "${{ github.workspace }}"
+            export PYTHONPATH="${{ github.workspace }}${PATH_SEP}${PYTHONPATH}"
 
-          if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
-            PATH_SEP=":"
-            echo "🐧 Running tests on Ubuntu (Direct Runner)..."
-          else
-            PATH_SEP=";"
-            echo "🪟 Running tests on Windows..."
-          fi
-       
-          cd "${{ github.workspace }}"
-          export PYTHONPATH="${{ github.workspace }}${PATH_SEP}${PYTHONPATH}"
-          python -m pytest -v -m gpu --alluredir="$RESULTS_DIR" --import-mode=importlib 
-          #pytest -v -m gpu --alluredir="$RESULTS_DIR"
-          TEST_EXIT_CODE=$?
+            # ---------- Pre-flight diagnostics (import visibility) ----------
+            python - <<'PY'
+                import importlib.util, os, sys, pprint, pathlib
+                print("=== Pre-flight Python Env ===")
+                print("Python:", sys.version)
+                print("CWD:", os.getcwd())
+                print("PYTHONPATH env:", os.environ.get("PYTHONPATH"))
+                print("supports/gpu_check.py exists?:", os.path.exists("supports/gpu_check.py"))
+                print("tests/device_utils.py exists?:", os.path.exists("tests/device_utils.py"))
+                print("find_spec('supports'):", importlib.util.find_spec("supports"))
+                print("find_spec('supports.gpu_check'):", importlib.util.find_spec("supports.gpu_check"))
+                print("sys.path:")
+                pprint.pprint(sys.path)
+                print("=== End pre-flight ===")
+                PY
 
-          if [ ! -d "$RESULTS_DIR" ] || [ -z "$(find $RESULTS_DIR -type f -name '*.json' 2>/dev/null)" ]; then
-            echo "❌ No Allure results found — setup or configuration failure."
-            echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+            python -m pytest -v -m gpu --alluredir="$RESULTS_DIR" --import-mode=importlib
+              #pytest -v -m gpu --alluredir="$RESULTS_DIR"
 
-          if [ $TEST_EXIT_CODE -ne 0 ]; then
-            echo "⚠️ Some tests failed (pytest exit code $TEST_EXIT_CODE)."
-            echo "test_outcome=UNSTABLE" >> $GITHUB_OUTPUT
-            exit 0
-          else
-            echo "✅ All tests passed successfully."
-            echo "test_outcome=PASS" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+            TEST_EXIT_CODE=$?
+            if [ ! -d "$RESULTS_DIR" ] \
+               || [ -z "$(find $RESULTS_DIR -type f -name '*.json' 2>/dev/null)" ]; then
+              echo "❌ No Allure results found — setup or configuration failure."
+              echo "test_outcome=FAIL" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+
+            if [ $TEST_EXIT_CODE -ne 0 ]; then
+              echo "⚠️ Some tests failed (pytest exit code $TEST_EXIT_CODE)."
+              echo "test_outcome=UNSTABLE" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "✅ All tests passed successfully."
+              echo "test_outcome=PASS" >> $GITHUB_OUTPUT
+              exit 0
+            fi
 
       - name: Upload Allure Results Artifact
         uses: actions/upload-artifact@v4
