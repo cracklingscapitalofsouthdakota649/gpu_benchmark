@@ -5,12 +5,12 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 permissions:
-  contents: read     # Default read access
-  pages: write       # To deploy the report via GitHub Pages
-  id-token: write    # To authenticate deployment actions
+  contents: read     
+  pages: write       
+  id-token: write    
 
 env:
   ALLURE_VERSION: 2.29.0
@@ -20,23 +20,25 @@ env:
 jobs:
   test:
     name: Run Pytest Benchmarks (Linux)
-    runs-on: ubuntu-latest # ⬅️ Requirement 2: Run On Linux only
+    runs-on: ubuntu-latest
     
-    # Define outputs to pass the test status to the 'report' job
     outputs:
       test_outcome: ${{ steps.run_tests.outputs.test_outcome }}
       
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+        
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
           
-      - name: Install dependencies
+      - name: Configure Python Path and Install Dependencies
         run: |
+          # Inject the current working directory (repo root) into PYTHONPATH
+          echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
+          
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -44,43 +46,30 @@ jobs:
         run: mkdir -p ${{ env.RESULTS_DIR }}
 
       - name: Create Allure Support Files
-        # ⬅️ Requirement 6: environments.properties, categories.json, executor.json
         run: |
-          # 1. environments.properties
           cp supports/environments.properties ${{ env.RESULTS_DIR }}/environments.properties
-          
-          # 2. categories.json (using a placeholder if no custom categories are defined)
           echo '[]' > ${{ env.RESULTS_DIR }}/categories.json
-          
-          # 3. executor.json (provides build info for the Allure dashboard)
           echo "{\"name\":\"GitHub Actions\",\"type\":\"GitHub\",\"url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",\"buildName\":\"#${{ github.run_number }}.${{ github.run_attempt }}\",\"buildUrl\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" > ${{ env.RESULTS_DIR }}/executor.json
       
       - name: Run Pytest Benchmarks
         id: run_tests
         run: |
-          # ⬅️ Requirement 2: Pytest command & Requirement 3: PASS/FAIL/UNSTABLE policy
-          # Execute tests, capturing the exit code
           python -m pytest -v -m gpu --alluredir="${{ env.RESULTS_DIR }}"
           PYTEST_EXIT_CODE=$?
           
-          # Determine test outcome based on exit code
           if [ $PYTEST_EXIT_CODE -eq 0 ]; then
-            # Exit code 0: PASS - All tests passed
             OUTCOME="PASS"
           elif [ $PYTEST_EXIT_CODE -eq 1 ]; then
-            # Exit code 1: UNSTABLE - At least one test failed
             OUTCOME="UNSTABLE"
           else
-            # Exit code > 1: FAIL - Setup, config, or internal error
             OUTCOME="FAIL"
           fi
           
           echo "Test exit code: $PYTEST_EXIT_CODE. Outcome: $OUTCOME"
           echo "test_outcome=$OUTCOME" >> "$GITHUB_OUTPUT"
           
-          # Ensure step succeeds even if tests are UNSTABLE (exit code 1) to allow artifact upload
         shell: bash
-        continue-on-error: true 
+        continue-on-error: true
 
       - name: Upload Raw Allure Results
         uses: actions/upload-artifact@v4
@@ -88,12 +77,14 @@ jobs:
           name: allure-raw-results
           path: ${{ env.RESULTS_DIR }}
 
+  # ----------------------------------------------------
+  # Report Generation and Deployment Job
+  # ----------------------------------------------------
   report:
     name: Generate & Deploy Allure Report
-    needs: test # ⬅️ Requirement 5: Two jobs (test and report)
+    needs: test
     runs-on: ubuntu-latest
     
-    # Configure deployment environment
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -108,11 +99,13 @@ jobs:
           name: allure-raw-results
           path: ${{ env.RESULTS_DIR }}
           
+      # ⬅️ FIX APPLIED HERE: Set continue-on-error: true
       - name: Download Previous Allure History
         uses: actions/download-artifact@v4
         with:
           name: allure-history
-          path: previous_history # Download to a separate, temporary directory
+          path: previous_history
+        continue-on-error: true # ⬅️ Allow this step to fail if the artifact is missing or expired
           
       - name: Install Allure CLI & Generate Report
         run: |
@@ -121,12 +114,20 @@ jobs:
           unzip allure.zip
           ALLURE_BIN=allure-commandline-${{ env.ALLURE_VERSION }}/bin/allure
 
-          # ⬅️ Requirement 4 & 7: Copy history for trends/dashboard
-          # Check if history exists and move the 'history' directory into the new results
-          if [ -d "previous_history/history" ]; then
+          # Copy history files if the download succeeded
+          if [ -d "previous_history/allure-history/history" ]; then
             mkdir -p ${{ env.RESULTS_DIR }}/history
-            mv previous_history/history/* ${{ env.RESULTS_DIR }}/history/ || true
+            # Copy all files from the previous history into the new results
+            # Note: The download action puts the artifact content inside a folder named after the artifact.
+            cp -r previous_history/allure-history/history/* ${{ env.RESULTS_DIR }}/history/ || true
             echo "Copied previous history for trends."
+          # Handle the case where the artifact download succeeded but the content was flat (less common with v4)
+          elif [ -d "previous_history/history" ]; then
+            mkdir -p ${{ env.RESULTS_DIR }}/history
+            cp -r previous_history/history/* ${{ env.RESULTS_DIR }}/history/ || true
+            echo "Copied previous history for trends (flat structure)."
+          else
+            echo "No previous Allure history found. Generating report without history trends."
           fi
           
           # Generate report
@@ -143,21 +144,19 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Upload Pages Artifact
-        # ⬅️ Requirement 1: Build artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ env.SITE_DIR }}
 
       - name: Deploy to GitHub Pages
         id: deployment
-        # ⬅️ Requirement 1: Deploy with GitHub Actions
         uses: actions/deploy-pages@v4
 
       - name: Add Workflow Summary (Status Badges)
         run: |
-          # Displays the final outcome based on the 'test' job result
           TEST_STATUS=${{ needs.test.outputs.test_outcome }}
-          
+          PAGE_URL=${{ steps.deployment.outputs.page_url }}
+
           if [[ "$TEST_STATUS" == "FAIL" ]]; then
             STATUS_ICON="❌"
             STATUS_TEXT="Fail (Setup/Config Error)"
@@ -172,5 +171,5 @@ jobs:
           echo "### 🤖 GPU Benchmark CI/CD" >> $GITHUB_STEP_SUMMARY
           echo "Status: **$STATUS_ICON $STATUS_TEXT**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "[View Report](${{ steps.deployment.outputs.page_url }}/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[View Report]($PAGE_URL/index.html)" >> $GITHUB_STEP_SUMMARY
         shell: bash
