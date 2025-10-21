@@ -1,6 +1,7 @@
 # tests/conftest.py
 
 import sys
+import os
 import warnings
 import pytest
 import allure
@@ -21,8 +22,7 @@ except ImportError:
 # Get the path to the root of the project (one directory up from 'tests')
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
-# Prepend the project root to sys.path
-# This ensures Python can find the 'supports' package from the 'tests' directory.
+# Prepend the project root to sys.path, guaranteeing module discovery
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
