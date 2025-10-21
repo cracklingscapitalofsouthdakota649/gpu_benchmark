@@ -8,5 +8,8 @@ nvidia-ml-py
 amdsmi
 pygments
 pluggy
+torch
+torchvision
+torchaudio
 # (No torch/vision/audio here; installed by script per backend)
 # (No intel-extension-for-pytorch on Windows; installed only on Linux/WSL runner)
