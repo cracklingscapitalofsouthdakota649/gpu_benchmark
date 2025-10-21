@@ -5,7 +5,8 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  # Sets the timeout for the entire workflow to 60 minutes
+
+# Sets the timeout for the entire workflow to 60 minutes
   timeout-minutes: 60
   
 permissions:
