@@ -6,6 +6,7 @@ examples/
 allure-results/
 tmp/
 venv310/
+allure-report/
 
 # VM images & snapshots (HUGE files, never commit)
 *.qcow2
