@@ -1,6 +1,7 @@
 # requirements.txt (shared, framework-free)
 pytest
 pytest-benchmark
+pytest-asyncio
 allure-pytest
 psutil
 matplotlib

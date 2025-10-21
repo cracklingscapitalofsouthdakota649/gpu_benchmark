@@ -5,7 +5,9 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-
+  # Sets the timeout for the entire workflow to 60 minutes
+  timeout-minutes: 60
+  
 permissions:
   contents: write
   pages: write
@@ -39,11 +41,13 @@ jobs:
         with:
           python-version: 3.11
 
-      # Removed explicit cache for pip dependencies. 
-      # While caching can be good, for smaller/moderate dependency lists, 
-      # the overhead can sometimes outweigh the benefit, and using the 
-      # standard setup-python/pip install approach is often clearer.
-      # You can re-add it if install time becomes an issue.
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
