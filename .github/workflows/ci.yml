@@ -54,9 +54,6 @@ jobs:
       - name: Run tests
         id: run_tests
         shell: bash
-        # 🚀 FIX: Set PYTHONPATH directly on this step to guarantee Pytest finds 'supports' module.
-        env:
-          PYTHONPATH: ${{ github.workspace }}
         run: |
           set +e
           OS_NAME=${{ matrix.os }}
@@ -68,6 +65,10 @@ jobs:
           else
             echo "🪟 Running tests on Windows..."
           fi
+
+          # 🚀 FINAL FIX: Explicitly set and export PYTHONPATH in the shell script.
+          # This prepends the repository root to the path, ensuring the 'supports' module is found.
+          export PYTHONPATH="${{ github.workspace }}:${PYTHONPATH}"
           
           # Run pytest directly on the runner for both OSes
           pytest -v -m gpu --alluredir="$RESULTS_DIR"
