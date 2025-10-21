@@ -48,11 +48,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # FIX: Set PYTHONPATH to the workspace root to resolve the double-import issue
-          echo "PYTHONPATH=/home/runner/work/gpu_benchmark" >> $GITHUB_ENV
 
-      # The 'Build Docker Image' step is removed entirely as requested.
-      # The Linux tests will now run directly on the ubuntu-latest runner.
+      # 🚀 FIX: Set PYTHONPATH to the root directory ($GITHUB_WORKSPACE) 
+      # This tells Python to treat the repo root as a source path,
+      # allowing imports like 'from supports.gpu_check import...' to work.
+      - name: Set PYTHONPATH for module discovery
+        shell: bash
+        run: |
+          echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
 
       - name: Run tests
         id: run_tests
