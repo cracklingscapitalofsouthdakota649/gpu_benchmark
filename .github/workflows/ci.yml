@@ -1,31 +1,32 @@
-name: GPU Benchmark CI
+name: GPU Benchmarks CI/CD
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch: # Allow manual trigger
 
 permissions:
-  contents: read     # Default read access
-  pages: write       # To deploy the report via GitHub Pages
-  id-token: write    # To authenticate deployment actions
+  contents: write
+  pages: write
+  id-token: write
 
 env:
   ALLURE_VERSION: 2.29.0
-  RESULTS_DIR: allure-results
-  SITE_DIR: allure-report
+  SITE_DIR: site
 
 jobs:
   test:
-    name: Run Pytest Benchmarks (Linux)
-    runs-on: ubuntu-latest # ⬅️ Requirement 2: Run On Linux only
-    
-    # Define outputs to pass the test status to the 'report' job
+    name: Run tests on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
     outputs:
       test_outcome: ${{ steps.run_tests.outputs.test_outcome }}
-      
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,37 +35,48 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
-          
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Create Allure Results Directory
-        run: mkdir -p ${{ env.RESULTS_DIR }}
+      - name: Build Docker Image
+        if: matrix.os == 'ubuntu-latest'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: gpu-benchmark:ci-build
+          load: true
 
-      - name: Create Allure Support Files
-        # ⬅️ Requirement 6: environments.properties, categories.json, executor.json
-        run: |
-          # 1. environments.properties
-          cp supports/environments.properties ${{ env.RESULTS_DIR }}/environments.properties
-          
-          # 2. categories.json (using a placeholder if no custom categories are defined)
-          echo '[]' > ${{ env.RESULTS_DIR }}/categories.json
-          
-          # 3. executor.json (provides build info for the Allure dashboard)
-          echo "{\"name\":\"GitHub Actions\",\"type\":\"GitHub\",\"url\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",\"buildName\":\"#${{ github.run_number }}.${{ github.run_attempt }}\",\"buildUrl\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" > ${{ env.RESULTS_DIR }}/executor.json
-     
       - name: Run tests
         id: run_tests
         shell: bash
         run: |
           set +e
-          RESULTS_DIR="allure-results"
+          OS_NAME=${{ matrix.os }}
+          RESULTS_DIR="allure-results/$OS_NAME"
           mkdir -p "$RESULTS_DIR"
-          
-          python -m pytest -v -m gpu --alluredir="$RESULTS_DIR"
-          PYTEST_EXIT_CODE=$?
+
+          if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
+            echo "🐳 Running tests in Docker..."
+            docker run --rm -v $PWD:/workspace -w /workspace gpu-benchmark:ci-build \
+              pytest -v -m gpu --alluredir="$RESULTS_DIR"
+            TEST_EXIT_CODE=$?
+          else
+            echo "🪟 Running tests on Windows..."
+            pytest -v -m gpu --alluredir="$RESULTS_DIR"
+            TEST_EXIT_CODE=$?
+          fi
 
           if [ ! -d "$RESULTS_DIR" ] || [ -z "$(find $RESULTS_DIR -type f -name '*.json' 2>/dev/null)" ]; then
             echo "❌ No Allure results found — setup or configuration failure."
@@ -81,13 +93,13 @@ jobs:
             echo "test_outcome=PASS" >> $GITHUB_OUTPUT
             exit 0
           fi
-          
+
       - name: Upload Allure Results Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: allure-results
-          path: allure-results
-          
+          name: allure-results-${{ matrix.os }}
+          path: allure-results/${{ matrix.os }}
+
   report:
     name: Generate Allure Reports & Deploy
     runs-on: ubuntu-latest
@@ -198,7 +210,7 @@ jobs:
             margin: 0; /* Aligns the container to the left */
           }
           </style></head><body>
-          <h1>🤖 GPU Benchmarks CI/CD Build History</h1>
+          <h1>🤖 GPU Benchmarks Simulation CI/CD Build History</h1>
           <h2>🧩 Latest Allure Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
 
           for OS in ubuntu-latest windows-latest; do
@@ -338,7 +350,7 @@ jobs:
             STATUS_TEXT="All tests passed"
           fi
 
-          echo "### 🤖 GPU Benchmarks CI/CD" >> $GITHUB_STEP_SUMMARY
+          echo "### 🤖 GPU Benchmarks Simulation CI/CD" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
           echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
