@@ -3,7 +3,7 @@ data/
 temp/
 logs
 examples/
-supports/*.py
+supports/
 allure-results/
 tmp/
 venv310/
