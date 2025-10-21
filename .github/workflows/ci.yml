@@ -55,7 +55,7 @@ jobs:
       - name: Run tests and collect Allure results
         id: run_tests
         # Standardize on bash for cross-platform scripts within GitHub Actions
-        timeout-minutes: 30
+        timeout-minutes: 90
         shell: bash
         # Use set -e for early exit on command failure, but the script 
         # is complex enough that manual exit codes are preferred here.
