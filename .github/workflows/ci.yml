@@ -49,20 +49,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build Docker Image
-        if: matrix.os == 'ubuntu-latest'
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          tags: gpu-benchmark:ci-build
-          load: true
-          # FIX: Adding a memory/disk limit here is not possible with `load: true` 
-          # but you must fix the space issue inside your Dockerfile 
-          # (e.g., by clearing the pip cache after installing torch).
+      # The 'Build Docker Image' step is removed entirely as requested.
+      # The Linux tests will now run directly on the ubuntu-latest runner.
 
       - name: Run tests
         id: run_tests
+        # Use bash shell for cross-platform consistency in script logic
         shell: bash
         run: |
           set +e
@@ -71,21 +63,14 @@ jobs:
           mkdir -p "$RESULTS_DIR"
 
           if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
-            echo "🐳 Running tests in Docker..."
-            # Check if the image exists before running (failsafe against build failure)
-            if docker image inspect gpu-benchmark:ci-build >/dev/null 2>&1; then
-              docker run --rm -v $PWD:/workspace -w /workspace gpu-benchmark:ci-build \
-                pytest -v -m gpu --alluredir="$RESULTS_DIR"
-              TEST_EXIT_CODE=$?
-            else
-              echo "❌ Docker image failed to build. Skipping tests."
-              TEST_EXIT_CODE=1
-            fi
+            echo "🐧 Running tests on Ubuntu..."
           else
             echo "🪟 Running tests on Windows..."
-            pytest -v -m gpu --alluredir="$RESULTS_DIR"
-            TEST_EXIT_CODE=$?
           fi
+          
+          # Run pytest directly on the runner for both OSes
+          pytest -v -m gpu --alluredir="$RESULTS_DIR"
+          TEST_EXIT_CODE=$?
 
           if [ ! -d "$RESULTS_DIR" ] || [ -z "$(find $RESULTS_DIR -type f -name '*.json' 2>/dev/null)" ]; then
             echo "❌ No Allure results found — setup or configuration failure."
@@ -104,7 +89,6 @@ jobs:
           fi
 
       - name: Upload Allure Results Artifact
-        if: always() # Ensure upload even on test failure
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-${{ matrix.os }}
@@ -124,10 +108,8 @@ jobs:
       # Fix: Dynamically find the workflow filename.
       - name: Get workflow filename
         id: get_workflow_name
-        # FIX: The expression 'basename .github/workflows/*.yml' may fail if multiple files exist.
-        # It's safer to use the built-in GITHUB_WORKFLOW environment variable which holds the file name.
         run: echo "WORKFLOW_FILE=${{ github.workflow }}.yml" >> $GITHUB_ENV
-      
+
       # Fix: Use previous working download artifact method
       - name: Download previous Allure history artifact
         uses: dawidd6/action-download-artifact@v6
@@ -162,17 +144,16 @@ jobs:
       - name: Generate Allure Reports Per OS
         shell: bash
         run: |
+          sudo apt-get install -y jq # Ensure jq is installed
           SITE_DIR="site"
           BUILD_NUMBER=${{ github.run_number }}
           mkdir -p "$SITE_DIR/latest"
 
           for OS in ubuntu-latest windows-latest; do
-            # The uploaded artifact name is allure-results-$OS, not allure-results/allure-results-$OS
             RESULTS_DIR="allure-results/allure-results-$OS"
             REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
             REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
             
-            # Ensure the results directory exists, even if the artifact was not uploaded/empty
             mkdir -p "$RESULTS_DIR" "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
 
             # Fix: Preserve trend data from previous site
@@ -192,7 +173,7 @@ jobs:
             REPO_NAME="${GITHUB_REPOSITORY##*/}"
             echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$RESULTS_DIR/executor.json"
             
-            # Only run generate if results exist to prevent an empty history step in Allure
+            # Only run generate if results exist
             if [ -n "$(find $RESULTS_DIR -type f -name '*.json' 2>/dev/null)" ]; then
               allure generate "$RESULTS_DIR" -o "$REPORT_DIR_BUILD" --clean
               cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
@@ -214,9 +195,6 @@ jobs:
       - name: Rebuild index.html with Trend Charts
         shell: bash
         run: |
-          # Ensure jq is installed for parsing summary.json
-          sudo apt-get install -y jq
-          
           SITE_DIR="site"
           CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
           mkdir -p "$SITE_DIR"
@@ -286,14 +264,10 @@ jobs:
               if [ -f "$SUMMARY_FILE" ]; then
                 PASS_COUNT=$(jq -r '.statistic.passed // 0' "$SUMMARY_FILE" 2>/dev/null)
                 FAIL_COUNT=$(jq -r '.statistic.failed // 0' "$SUMMARY_FILE" 2>/dev/null)
-                # Unstable/Broken tests in Allure are categorized as 'broken' or 'unknown'
-                # The pipeline uses exit code to determine 'UNSTABLE' but chart data must come from Allure's report
                 BROKEN_COUNT=$(jq -r '.statistic.broken // 0' "$SUMMARY_FILE" 2>/dev/null)
-                SKIPPED_COUNT=$(jq -r '.statistic.skipped // 0' "$SUMMARY_FILE" 2>/dev/null)
                 
                 TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
                 TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
-                # Use broken as a proxy for unstable/failed-but-did-not-break-build
                 TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT)) 
               fi
             done
@@ -330,16 +304,12 @@ jobs:
               scales: { 
                 y: { 
                   beginAtZero: true, 
-                  # FIX: Remove stepSize to allow decimal steps if total is ever a decimal, but keep it for integers if desired
-                  # stepSize: 1, 
-                  # Y-axis title
                   title: {
                     display: true,
                     text: 'Total Number of Tests'
                   }
                 },
                 x: {
-                  # X-axis title
                   title: {
                     display: true,
                     text: 'Build Number'
