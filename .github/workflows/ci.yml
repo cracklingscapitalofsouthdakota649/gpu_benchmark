@@ -48,9 +48,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      # REMOVED: The 'Build Docker Image' step has been removed.
-
+          
       - name: Run tests
         id: run_tests
         shell: bash
@@ -69,21 +67,7 @@ jobs:
             cd "${{ github.workspace }}"
             export PYTHONPATH="${{ github.workspace }}${PATH_SEP}${PYTHONPATH}"
 
-            # ---------- Pre-flight diagnostics (import visibility) ----------
-            python - <<'PY'
-import importlib.util, os, sys, pprint, pathlib
-print("=== Pre-flight Python Env ===")
-print("Python:", sys.version)
-print("CWD:", os.getcwd())
-print("PYTHONPATH env:", os.environ.get("PYTHONPATH"))
-print("supports/gpu_check.py exists?:", os.path.exists("supports/gpu_check.py"))
-print("tests/device_utils.py exists?:", os.path.exists("tests/device_utils.py"))
-print("find_spec('supports'):", importlib.util.find_spec("supports"))
-print("find_spec('supports.gpu_check'):", importlib.util.find_spec("supports.gpu_check"))
-print("sys.path:")
-pprint.pprint(sys.path)
-print("=== End pre-flight ===")
-PY
+            .github/scripts/run_tests.sh "${{ matrix.os }}"
 
             python -m pytest -v -m gpu --alluredir="$RESULTS_DIR" --import-mode=importlib
               #pytest -v -m gpu --alluredir="$RESULTS_DIR"
