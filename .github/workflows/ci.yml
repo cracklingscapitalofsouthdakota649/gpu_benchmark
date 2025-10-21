@@ -73,7 +73,7 @@ jobs:
             fi
             
             # Run Pytest
-            pytest -v -m gpu --alluredir="$RESULTS_DIR" --import-mode=importlib
+            pytest -v --alluredir="$RESULTS_DIR" --import-mode=importlib
             TEST_EXIT_CODE=$?
             
             # 1. Check if results directory exists and has files (most critical check)
@@ -125,13 +125,15 @@ jobs:
       # is ci.yml, let's use the explicit name or the context variable.
       # Using github.workflow which is the name of the workflow file (ci.yml)
       
-      # Use an optimized action for downloading Allure Commandline
-      - name: Download Allure CLI
-        uses: simple-actions/allure-commandline@v1
-        with:
-          version: ${{ env.ALLURE_VERSION }}
-          # The action automatically adds it to $GITHUB_PATH
-
+      # Manually downloading Allure Commandline
+      - name: Download Allure CLI (Manual)
+        run: |
+          # Reverting to the original robust method
+          wget https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.tgz
+          tar -xzf allure-${{ env.ALLURE_VERSION }}.tgz
+          mv allure-${{ env.ALLURE_VERSION }} allure-commandline
+          echo "$(pwd)/allure-commandline/bin" >> $GITHUB_PATH
+          
       - name: Download Allure Test Results
         uses: actions/download-artifact@v4
         with:
