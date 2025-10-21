@@ -65,6 +65,7 @@ jobs:
               echo "🦾 Running tests on Windows..."
             fi
             cd "${{ github.workspace }}"
+            echo "github.workspace = ${{ github.workspace }}"
             export PYTHONPATH="${{ github.workspace }}${PATH_SEP}${PYTHONPATH}"
 
             .github/scripts/run_tests.sh "${{ matrix.os }}"
