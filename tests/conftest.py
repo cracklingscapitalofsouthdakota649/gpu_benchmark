@@ -1,4 +1,6 @@
 # tests/conftest.py
+
+import sys
 import warnings
 import pytest
 import allure
