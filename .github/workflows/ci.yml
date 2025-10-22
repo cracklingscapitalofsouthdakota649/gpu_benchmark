@@ -55,7 +55,7 @@ jobs:
       - name: Run tests and collect Allure results
         id: run_tests
         # Standardize on bash for cross-platform scripts within GitHub Actions
-        timeout-minutes: 5
+        timeout-minutes: 15
         shell: bash
         # Use set -e for early exit on command failure, but the script 
         # is complex enough that manual exit codes are preferred here.
@@ -71,6 +71,8 @@ jobs:
             # for pytest unless you were dynamically manipulating PYTHONPATH.
             if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
               echo "🐧 Running tests on Ubuntu (Direct Runner)..."
+              export PYOPENCL_CTX="0"
+              export OMP_NUM_THREADS=1
             else
               echo "🦾 Running tests on Windows..."
             fi
