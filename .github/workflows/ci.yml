@@ -55,7 +55,6 @@ jobs:
 
       - name: Run tests and collect Allure results
         id: run_tests
-        # Job-level timeout to fix root-level parsing error
         timeout-minutes: 15
         shell: bash
         run: |
@@ -72,16 +71,12 @@ jobs:
             echo "Runner OS=$OS_NAME" > "$ENV_PROPS_FILE"
             
             # 1. GPU Detection (Universal via Python script)
-            # Make sure to handle potential failure if 'supports/gpu_check.py' needs additional dependencies
-            # or if the script fails to run.
             GPU_JSON=$(python supports/gpu_check.py || echo '{"summary": {"backend": null, "cuda": false, "opencl_gpu_devices": 0}}')
             
-            # Use Python to parse the JSON string and extract values reliably
             GPU_BACKEND=$(python -c "import json; print(json.loads('''$GPU_JSON''')['summary'].get('backend'))")
             CUDA_AVAIL=$(python -c "import json; print(json.loads('''$GPU_JSON''')['summary'].get('cuda'))")
             OPENCL_COUNT=$(python -c "import json; print(json.loads('''$GPU_JSON''')['summary'].get('opencl_gpu_devices'))")
             
-            # Only include the backend if one was detected (not 'null')
             if [ "$GPU_BACKEND" != "None" ]; then
               echo "GPU Backend=$GPU_BACKEND" >> "$ENV_PROPS_FILE"
             fi
@@ -90,15 +85,15 @@ jobs:
 
             # 2. CPU Detection (OS-specific logic)
             if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
-              # Linux: Uses lscpu for CPU model and core count
+              # Linux: Uses lscpu
               CPU_MODEL=$(lscpu | grep 'Model name' | sed 's/.*: *//' | tr -d '\n')
               CPU_CORES=$(lscpu | grep '^CPU(s):' | awk '{print $2}' | tr -d '\n')
               echo "CPU Model=$CPU_MODEL" >> "$ENV_PROPS_FILE"
               echo "CPU Cores=$CPU_CORES" >> "$ENV_PROPS_FILE"
             else
-              # Windows: Uses wmic, parsed inside the Bash shell
-              CPU_MODEL=$(wmic cpu get Name /value | grep Name= | cut -d= -f2 | tr -d '\r\n')
-              CPU_CORES=$(wmic cpu get NumberOfCores /value | grep NumberOfCores= | cut -d= -f2 | tr -d '\r\n')
+              # ✅ FIX: Windows: Use powershell.exe (replaces wmic)
+              CPU_MODEL=$(powershell.exe -Command "(Get-CimInstance -ClassName Win32_Processor).Name" | tr -d '\r\n')
+              CPU_CORES=$(powershell.exe -Command "(Get-CimInstance -ClassName Win32_Processor).NumberOfCores" | tr -d '\r\n')
               echo "CPU Model=$CPU_MODEL" >> "$ENV_PROPS_FILE"
               echo "CPU Cores=$CPU_CORES" >> "$ENV_PROPS_FILE"
             fi
@@ -110,16 +105,15 @@ jobs:
 
             # Additional environment setup for Linux (if needed)
             if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
-              echo "🐧 Running tests on Ubuntu..."
+              echo "🐧 Running tests on Ubuntu (Direct Runner)..."
               export PYOPENCL_CTX="0"
               export OMP_NUM_THREADS=1
             else
               echo "🦾 Running tests on Windows..."
             fi
             
-            # Run Pytest (The fix for Windows path was to ensure no single-file path was used, 
-            # as the full directory is correctly processed by Pytest)
-            pytest -v -m gpu --alluredir="$RESULTS_DIR" --import-mode=importlib
+            # Run Pytest
+            pytest -v --alluredir="$RESULTS_DIR" --import-mode=importlib
             TEST_EXIT_CODE=$?
             
             # 1. Check if results directory exists and has files (most critical check)
@@ -139,7 +133,7 @@ jobs:
               echo "run_outcome=PASS" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-
+            
       - name: Upload Allure Results Artifact
         uses: actions/upload-artifact@v4
         with:
