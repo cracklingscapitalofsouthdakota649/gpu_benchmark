@@ -22,7 +22,7 @@ COMMON_PACKAGES = [
     "matplotlib==3.10.7",
     "numpy==2.2.6",
 ]
-
+'''
 TORCH_PACKAGES = {
     "cuda": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
     "rocm": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
@@ -30,6 +30,12 @@ TORCH_PACKAGES = {
     "intel_xpu": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
     "directml": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
     "cpu": ["torch==2.2.0", "torchvision==0.18.1", "torchaudio==2.2.0"],
+}
+'''
+
+TORCH_PACKAGES = {
+    k: ["torch", "torchvision", "torchaudio"]
+    for k in ["cuda", "rocm", "intel_opencl", "intel_xpu", "directml", "cpu"]
 }
 
 # -----------------------
