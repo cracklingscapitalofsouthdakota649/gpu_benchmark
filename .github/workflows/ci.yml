@@ -73,6 +73,9 @@ jobs:
               echo "🐧 Running tests on Ubuntu (Direct Runner)..."
               export PYOPENCL_CTX="0"
               export OMP_NUM_THREADS=1
+              #PID=$!
+              #wait $PID || true
+              #pkill -P $$ || true
             else
               echo "🦾 Running tests on Windows..."
             fi
