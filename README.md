@@ -110,8 +110,10 @@ gpu_benchmark/
 │  ├─ __init__.py
 │  ├─ conftest.py             # Fixtures for tests
 │  ├─ device_utils.py         # Utilities for device handling
+│  ├─ test_amd_gpu_accelerator.py # AMD-specific features
 │  ├─ test_cpu_reference.py   # CPU-only benchmarks
 │  ├─ test_data_preprocessing.py # Data I/O and transform speed
+│  ├─ test_directml_gpu_accelerator.py # DirectML-specific features
 │  ├─ test_gpu_compute.py     # General GPU compute benchmarks
 │  ├─ test_gpu_convnet.py     # Convolutional network throughput
 │  ├─ test_gpu_matrix_mul.py  # GEMM and linear algebra speed
@@ -122,7 +124,8 @@ gpu_benchmark/
 │  ├─ test_gpu_transformer.py # Transformer/attention block speed
 │  ├─ test_idle_baseline.py   # Baseline for system metrics
 │  ├─ test_inference_load.py  # Load testing for inference
-│  ├─ test_io_accelerator.py  # General IO/transfer bandwidth
+│  ├─ test_intel_gpu_accelerator.py # Intel-specific features
+│  ├─ test_io_accelerator.py  # General I/O and transfer bandwidth
 │  ├─ test_multi_gpu.py       # Multi-GPU/DDP/parallel tests
 │  ├─ test_network_io_accelerator.py # Network/distributed I/O
 │  ├─ test_nvidia_gpu_accelerator.py # NVIDIA-specific features
