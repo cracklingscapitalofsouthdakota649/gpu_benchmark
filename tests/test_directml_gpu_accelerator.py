@@ -28,6 +28,7 @@ def detect_directml():
 
 @pytest.mark.gpu
 @pytest.mark.accelerator
+@pytest.mark.directml
 class TestDirectMLAccelerator:
     @pytest.fixture(scope="class", autouse=True)
     def setup_device(self):

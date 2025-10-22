@@ -148,6 +148,7 @@ gpu_benchmark/
 | `nvidia` | Nvidia GPU Benchmark | NVIDIA-specific tests (e.g., CUDA, Tensor Cores). |
 | `amd` | AMD GPU Benchmark |AMD-specific tests (e.g., ROCm). |
 | `intel` | Intel GPU Benchmark | Intel-specific tests (e.g., oneAPI). |
+| `directml` | DirectML GPU Benchmark | DirectML-specific tests (e.g., oneAPI). |
 | `cpu` | CPU Benchmark | Tests running on CPU fallback. |
 | `stress` | GPU Stress | Heavy-load GPU endurance tests. |
 | `benchmark` | Performance | FPS, utilization, memory measurement. |
