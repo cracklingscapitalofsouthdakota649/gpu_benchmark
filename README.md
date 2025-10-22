@@ -59,7 +59,7 @@ Ensure consistent results across systems by running inside Docker.
 
 ### 🧱 Docker Image  
 Image: **`gpu-benchmark:latest`** — includes:  
-- Python 3.10 environment  
+- Python 3.10 or 3.11 environment  
 - PyTorch & required packages preinstalled  
 - Allure CLI for reporting  
 - `/app` as working directory  
@@ -97,6 +97,12 @@ gpu_benchmark/
 ├─ scripts/
 │  ├─ plot_gpu_metrics.py     # Generate charts for Allure
 │  └─ system_metrics.py       # Capture CPU/GPU metrics
+├─ .github/                   # GitHub Actions CI/CD workflows
+│  ├─ scripts/
+│  │  ├─ preflight.py         # CI environment check script
+│  │  └─ run_tests.sh         # Shell script to execute tests in CI
+│  └─ workflows/
+│     └─ ci.yml               # GitHub Actions CI configuration file
 ├─ tests/                     # Benchmark test cases
 │  ├─ __init__.py
 │  ├─ conftest.py             # Fixtures for tests
@@ -133,6 +139,9 @@ gpu_benchmark/
 | **Tag** | **Focus Area** | **Description** |
 |----------|----------------|-----------------|
 | `gpu` | GPU Benchmark | Tests running on CUDA/ROCm/DirectML/Intel GPU. |
+| `nvidia` | Nvidia GPU Benchmark | NVIDIA-specific tests (e.g., CUDA, Tensor Cores). |
+| `amd` | AMD GPU Benchmark |AMD-specific tests (e.g., ROCm). |
+| `intel` | Intel GPU Benchmark | Intel-specific tests (e.g., oneAPI). |
 | `cpu` | CPU Benchmark | Tests running on CPU fallback. |
 | `stress` | GPU Stress | Heavy-load GPU endurance tests. |
 | `benchmark` | Performance | FPS, utilization, memory measurement. |
