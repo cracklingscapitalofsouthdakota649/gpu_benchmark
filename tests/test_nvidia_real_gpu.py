@@ -9,11 +9,13 @@ import allure
 import numpy as np
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
+from torch.cuda.amp import autocast, GradScaler # Added from second file
 
 
 def detect_nvidia_gpu():
     """Check for NVIDIA GPU availability."""
     try:
+        # Check for CUDA availability and confirm it's an NVIDIA device
         return torch.cuda.is_available() and "nvidia" in torch.cuda.get_device_name(0).lower()
     except Exception:
         return False
@@ -24,6 +26,7 @@ def detect_nvidia_gpu():
 class TestRealNvidiaGPU:
     @pytest.fixture(scope="class", autouse=True)
     def setup_device(self):
+        """Skip test if no NVIDIA GPU is detected, otherwise set up the device."""
         if not detect_nvidia_gpu():
             pytest.skip("No NVIDIA GPU detected.")
         torch.cuda.empty_cache()
@@ -40,6 +43,7 @@ class TestRealNvidiaGPU:
     def test_tensor_core_gemm(self, setup_device, benchmark):
         """Benchmark FP16 matrix multiplication using Tensor Cores."""
         device = setup_device
+        # Use large matrices for maximum utilization
         a = torch.randn(8192, 8192, device=device, dtype=torch.float16)
         b = torch.randn(8192, 8192, device=device, dtype=torch.float16)
 
@@ -51,6 +55,7 @@ class TestRealNvidiaGPU:
             return time.perf_counter() - start
 
         duration = benchmark(matmul_op)
+        # Calculate TFLOPs: 2 * N^3 / time
         tflops = (2 * 8192**3) / (duration * 1e12)
         allure.attach(f"{tflops:.2f} TFLOPs", name="Tensor Core GEMM Performance")
         assert tflops > 30, f"Low Tensor Core throughput: {tflops:.2f} TFLOPs"
@@ -75,7 +80,8 @@ class TestRealNvidiaGPU:
         ).to(device)
 
         model.eval()
-        data = torch.randn((128, 3, 224, 224), device=device)
+        batch_size = 128
+        data = torch.randn((batch_size, 3, 224, 224), device=device)
 
         def forward_pass():
             torch.cuda.synchronize()
@@ -85,7 +91,7 @@ class TestRealNvidiaGPU:
             return time.perf_counter() - start
 
         duration = benchmark(forward_pass)
-        samples_per_sec = 128 / duration
+        samples_per_sec = batch_size / duration
         allure.attach(f"{samples_per_sec:.2f} img/sec", name="CNN Inference Throughput")
         assert samples_per_sec > 500, f"CNN throughput below expectation: {samples_per_sec:.2f} img/sec"
 
@@ -127,6 +133,7 @@ class TestRealNvidiaGPU:
         free_before = torch.cuda.mem_get_info(device)[0]
 
         for _ in range(100):
+            # Allocate 8 large tensors
             tensors = [torch.randn((512, 512, 512), device=device) for _ in range(8)]
             del tensors
             torch.cuda.empty_cache()
@@ -145,12 +152,13 @@ class TestRealNvidiaGPU:
     def test_gpu_cpu_transfer_bandwidth(self, setup_device, benchmark):
         """Measure GPU to CPU data transfer bandwidth."""
         device = setup_device
-        data = torch.randn((1024, 1024, 1024), device=device)
+        # 4GB tensor (1024^3 elements * 4 bytes/float)
+        data = torch.randn((1024, 1024, 1024), device=device) 
 
         def transfer_op():
             torch.cuda.synchronize()
             start = time.perf_counter()
-            _ = data.cpu()
+            _ = data.cpu() # Transfer from GPU to CPU
             torch.cuda.synchronize()
             return time.perf_counter() - start
 
@@ -161,7 +169,7 @@ class TestRealNvidiaGPU:
         assert bandwidth > 8, f"Low PCIe bandwidth: {bandwidth:.2f} GB/s"
 
     # ───────────────────────────────────────────────────────────────
-    # 6️. DataLoader to GPU Throughput (Pinned Memory)
+    # 6️. DataLoader to GPU Throughput (Pinned Memory) - Unique from File 1
     # ───────────────────────────────────────────────────────────────
     @allure.feature("NVIDIA GPU")
     @allure.story("DataLoader to GPU Transfer")
@@ -207,7 +215,57 @@ class TestRealNvidiaGPU:
         assert bandwidth_gbps > 10.0, f"Low DataLoader transfer speed: {bandwidth_gbps:.2f} GB/s"
         
     # ───────────────────────────────────────────────────────────────
-    # 7️. Sparse EmbeddingBag Lookup Throughput
+    # 7️. Mixed Precision (AMP) Acceleration Validation - Unique from File 2
+    # ───────────────────────────────────────────────────────────────
+    @allure.feature("NVIDIA GPU")
+    @allure.story("Automatic Mixed Precision (AMP) Speedup")
+    @pytest.mark.accelerator
+    def test_mixed_precision_speedup(self, setup_device, benchmark):
+        """Compare FP32 vs AMP performance on a CNN forward pass."""
+        device = setup_device
+        # A deeper model to showcase AMP benefits
+        model = nn.Sequential(
+            nn.Conv2d(3, 128, 3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, 3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(128, 1000)
+        ).to(device)
+        model.eval()
+
+        data = torch.randn((64, 3, 224, 224), device=device)
+
+        def forward_fp32():
+            torch.cuda.synchronize()
+            start = time.perf_counter()
+            _ = model(data)
+            torch.cuda.synchronize()
+            return time.perf_counter() - start
+
+        def forward_amp():
+            torch.cuda.synchronize()
+            start = time.perf_counter()
+            with autocast():
+                _ = model(data) # Operations inside autocast will use FP16 where possible
+            torch.cuda.synchronize()
+            return time.perf_counter() - start
+
+        fp32_time = benchmark(forward_fp32)
+        amp_time = benchmark(forward_amp)
+        speedup = fp32_time / amp_time
+
+        allure.attach(
+            f"FP32: {fp32_time:.4f}s\nAMP: {amp_time:.4f}s\nSpeedup: {speedup:.2f}×",
+            name="AMP Speedup Report",
+            attachment_type=allure.attachment_type.TEXT
+        )
+
+        assert speedup > 1.5, f"Expected AMP speedup ≥ 1.5×, got {speedup:.2f}×"
+
+    # ───────────────────────────────────────────────────────────────
+    # 8️. Sparse EmbeddingBag Lookup Throughput - Unique from File 1
     # ───────────────────────────────────────────────────────────────
     @allure.feature("NVIDIA GPU")
     @allure.story("Sparse EmbeddingBag Lookup")
@@ -249,7 +307,7 @@ class TestRealNvidiaGPU:
         assert lookups_per_sec > 10_000_000, f"Low embedding lookup throughput: {lookups_per_sec / 1e6:.2f} M-lookups/sec"
         
     # ───────────────────────────────────────────────────────────────
-    # 8️. cuDNN-Accelerated RNN (GRU) Throughput
+    # 9️. cuDNN-Accelerated RNN (GRU) Throughput - Unique from File 1
     # ───────────────────────────────────────────────────────────────
     @allure.feature("NVIDIA GPU")
     @allure.story("cuDNN RNN (GRU) Throughput")
@@ -264,14 +322,13 @@ class TestRealNvidiaGPU:
         seq_len = 100
         
         # Initialize a GRU layer (relies on cuDNN)
-        # batch_first=True is a common real-world configuration
         model = nn.GRU(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True
         ).to(device)
-        model.eval() # Use eval mode for inference benchmark
+        model.eval() 
         
         # (Batch, Sequence, Features)
         data = torch.randn(batch_size, seq_len, input_size, device=device)
@@ -294,7 +351,7 @@ class TestRealNvidiaGPU:
         assert throughput > 1_000_000, f"Low GRU throughput: {throughput / 1e6:.2f} M-samples/sec"        
         
     # ───────────────────────────────────────────────────────────────
-    # 9️. cuFFT Throughput (Fast Fourier Transform)
+    # 10. cuFFT Throughput (Fast Fourier Transform) - Unique from File 1
     # ───────────────────────────────────────────────────────────────
     @allure.feature("NVIDIA GPU")
     @allure.story("cuFFT (FFT) Throughput")
@@ -302,7 +359,7 @@ class TestRealNvidiaGPU:
     def test_fft_throughput(self, setup_device, benchmark):
         """Benchmark cuFFT by performing a large 3D FFT."""
         device = setup_device
-        # 512^3 complex tensor (each element is 2x 4-byte floats)
+        # 512^3 complex tensor
         shape = (512, 512, 512)
         try:
             data = torch.randn(shape, dtype=torch.complex64, device=device)
@@ -318,10 +375,10 @@ class TestRealNvidiaGPU:
             return time.perf_counter() - start
             
         duration = benchmark(fft_op)
-        # N*log(N) complexity, but we measure throughput
+        # Calculate throughput in Giga-elements processed per second
         giga_elements = (data.numel()) / 1e9
         throughput_geps = giga_elements / duration
         
         allure.attach(f"{throughput_geps:.2f} Giga-elements/sec", name="cuFFT (fftn) Throughput")
         # FFTs are memory-bound
-        assert throughput_geps > 20, f"Low cuFFT throughput: {throughput_geps:.2f} Giga-elements/sec"        
+        assert throughput_geps > 20, f"Low cuFFT throughput: {throughput_geps:.2f} Giga-elements/sec"

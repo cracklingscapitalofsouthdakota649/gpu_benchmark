@@ -98,13 +98,32 @@ gpu_benchmark/
 │  ├─ plot_gpu_metrics.py     # Generate charts for Allure
 │  └─ system_metrics.py       # Capture CPU/GPU metrics
 ├─ tests/                     # Benchmark test cases
-│  ├─ test_data_preprocessing.py
-│  ├─ test_gpu_stress.py
-│  ├─ test_inference_load.py
-│  └─ test_idle_baseline.py
+│  ├─ __init__.py
+│  ├─ conftest.py             # Fixtures for tests
+│  ├─ device_utils.py         # Utilities for device handling
+│  ├─ test_cpu_reference.py   # CPU-only benchmarks
+│  ├─ test_data_preprocessing.py # Data I/O and transform speed
+│  ├─ test_gpu_compute.py     # General GPU compute benchmarks
+│  ├─ test_gpu_convnet.py     # Convolutional network throughput
+│  ├─ test_gpu_matrix_mul.py  # GEMM and linear algebra speed
+│  ├─ test_gpu_memory.py      # VRAM allocation and bandwidth
+│  ├─ test_gpu_mixed_precision.py # AMP/FP16 performance validation
+│  ├─ test_gpu_model_inference.py # End-to-end model inference
+│  ├─ test_gpu_stress.py      # Heavy-load and endurance tests
+│  ├─ test_gpu_transformer.py # Transformer/attention block speed
+│  ├─ test_idle_baseline.py   # Baseline for system metrics
+│  ├─ test_inference_load.py  # Load testing for inference
+│  ├─ test_io_accelerator.py  # General IO/transfer bandwidth
+│  ├─ test_multi_gpu.py       # Multi-GPU/DDP/parallel tests
+│  ├─ test_network_io_accelerator.py # Network/distributed I/O
+│  ├─ test_nvidia_gpu_accelerator.py # NVIDIA-specific features
+│  ├─ test_nvidia_real_gpu.py # Comprehensive real-world benchmarks
+│  ├─ test_nvidia_tensorrt_cudnn.py # TensorRT/cuDNN acceleration
+│  └─ test_parallel_training.py # Data/model parallelism speed
 ├─ venv310/                   # Virtual environment (auto-created)
 ├─ allure-results/            # Benchmark reports
 └─ .benchmarks/               # Pytest-benchmark history
+
 ```
 
 ---
