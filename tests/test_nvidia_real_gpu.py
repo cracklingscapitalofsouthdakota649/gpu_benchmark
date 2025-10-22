@@ -159,3 +159,169 @@ class TestRealNvidiaGPU:
         bandwidth = size_gb / duration
         allure.attach(f"{bandwidth:.2f} GB/s", name="PCIe Transfer Bandwidth")
         assert bandwidth > 8, f"Low PCIe bandwidth: {bandwidth:.2f} GB/s"
+
+    # ───────────────────────────────────────────────────────────────
+    # 6️. DataLoader to GPU Throughput (Pinned Memory)
+    # ───────────────────────────────────────────────────────────────
+    @allure.feature("NVIDIA GPU")
+    @allure.story("DataLoader to GPU Transfer")
+    @pytest.mark.accelerator
+    def test_dataloader_to_gpu_throughput(self, setup_device, benchmark):
+        """Benchmark data transfer from a parallel DataLoader to GPU."""
+        device = setup_device
+        # Create a 2GB dummy dataset (500 samples, ~4MB/sample)
+        num_samples = 500
+        data = torch.randn(num_samples, 3, 1024, 1024) 
+        labels = torch.randn(num_samples, 1)
+        dataset = TensorDataset(data, labels)
+        
+        # Use pin_memory=True for faster CPU->GPU async transfers
+        loader = DataLoader(dataset, batch_size=64, num_workers=4, pin_memory=True)
+        
+        def transfer_loop():
+            total_bytes = 0
+            for x, y in loader:
+                torch.cuda.synchronize()
+                start = time.perf_counter()
+                
+                # non_blocking=True works with pin_memory
+                x = x.to(device, non_blocking=True) 
+                y = y.to(device, non_blocking=True)
+                
+                torch.cuda.synchronize()
+                duration = time.perf_counter() - start
+                
+                # Track bytes transferred per loop iteration
+                total_bytes += (x.nelement() * x.element_size()) + (y.nelement() * y.element_size())
+            
+            # This benchmark variant returns the computed throughput
+            return total_bytes
+        
+        # We benchmark the entire epoch loop
+        total_bytes_transferred = benchmark(transfer_loop)
+        total_duration = benchmark.stats.last_duration
+        
+        bandwidth_gbps = (total_bytes_transferred / total_duration) / (1024**3)
+        
+        allure.attach(f"{bandwidth_gbps:.2f} GB/s", name="DataLoader to GPU Bandwidth")
+        assert bandwidth_gbps > 10.0, f"Low DataLoader transfer speed: {bandwidth_gbps:.2f} GB/s"
+        
+    # ───────────────────────────────────────────────────────────────
+    # 7️. Sparse EmbeddingBag Lookup Throughput
+    # ───────────────────────────────────────────────────────────────
+    @allure.feature("NVIDIA GPU")
+    @allure.story("Sparse EmbeddingBag Lookup")
+    @pytest.mark.benchmark
+    def test_sparse_embedding_lookup_speed(self, setup_device, benchmark):
+        """Benchmark sparse embedding lookups, common in recommender systems."""
+        device = setup_device
+        num_embeddings = 1_000_000  # 1 Million embeddings
+        embedding_dim = 128
+        batch_size = 512
+        lookups_per_sample = 20
+        
+        # Initialize a large embedding table on the GPU
+        embedding_bag = nn.EmbeddingBag(
+            num_embeddings, 
+            embedding_dim, 
+            mode='mean', 
+            sparse=True  # Use sparse gradients
+        ).to(device)
+        
+        # Create a batch of indices to look up.
+        indices = torch.randint(low=0, high=num_embeddings, 
+                                size=(batch_size, lookups_per_sample), 
+                                device=device)
+        
+        def lookup_op():
+            # This operation is heavily memory-bandwidth bound (gather)
+            torch.cuda.synchronize()
+            start = time.perf_counter()
+            _ = embedding_bag(indices)
+            torch.cuda.synchronize()
+            return time.perf_counter() - start
+
+        duration = benchmark(lookup_op)
+        lookups_per_sec = (batch_size * lookups_per_sample) / duration
+        
+        allure.attach(f"{lookups_per_sec / 1e6:.2f} M-lookups/sec", name="EmbeddingBag Throughput")
+        # This assertion is highly dependent on the GPU model
+        assert lookups_per_sec > 10_000_000, f"Low embedding lookup throughput: {lookups_per_sec / 1e6:.2f} M-lookups/sec"
+        
+    # ───────────────────────────────────────────────────────────────
+    # 8️. cuDNN-Accelerated RNN (GRU) Throughput
+    # ───────────────────────────────────────────────────────────────
+    @allure.feature("NVIDIA GPU")
+    @allure.story("cuDNN RNN (GRU) Throughput")
+    @pytest.mark.benchmark
+    def test_rnn_gru_throughput(self, setup_device, benchmark):
+        """Benchmark a multi-layer GRU, common in sequence modeling."""
+        device = setup_device
+        input_size = 256
+        hidden_size = 1024
+        num_layers = 4
+        batch_size = 128
+        seq_len = 100
+        
+        # Initialize a GRU layer (relies on cuDNN)
+        # batch_first=True is a common real-world configuration
+        model = nn.GRU(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True
+        ).to(device)
+        model.eval() # Use eval mode for inference benchmark
+        
+        # (Batch, Sequence, Features)
+        data = torch.randn(batch_size, seq_len, input_size, device=device)
+        
+        # Hidden state (Layers, Batch, Hidden)
+        h0 = torch.randn(num_layers, batch_size, hidden_size, device=device)
+        
+        def rnn_forward_pass():
+            torch.cuda.synchronize()
+            start = time.perf_counter()
+            _ = model(data, h0)
+            torch.cuda.synchronize()
+            return time.perf_counter() - start
+            
+        duration = benchmark(rnn_forward_pass)
+        # Calculate throughput in total samples processed per second
+        throughput = (batch_size * seq_len) / duration
+        
+        allure.attach(f"{throughput / 1e6:.2f} M-samples/sec", name="GRU Forward Throughput")
+        assert throughput > 1_000_000, f"Low GRU throughput: {throughput / 1e6:.2f} M-samples/sec"        
+        
+    # ───────────────────────────────────────────────────────────────
+    # 9️. cuFFT Throughput (Fast Fourier Transform)
+    # ───────────────────────────────────────────────────────────────
+    @allure.feature("NVIDIA GPU")
+    @allure.story("cuFFT (FFT) Throughput")
+    @pytest.mark.benchmark
+    def test_fft_throughput(self, setup_device, benchmark):
+        """Benchmark cuFFT by performing a large 3D FFT."""
+        device = setup_device
+        # 512^3 complex tensor (each element is 2x 4-byte floats)
+        shape = (512, 512, 512)
+        try:
+            data = torch.randn(shape, dtype=torch.complex64, device=device)
+        except Exception as e:
+            pytest.skip(f"Could not allocate tensor for FFT test: {e}")
+            
+        def fft_op():
+            torch.cuda.synchronize()
+            start = time.perf_counter()
+            # Perform 3D Fast Fourier Transform
+            _ = torch.fft.fftn(data)
+            torch.cuda.synchronize()
+            return time.perf_counter() - start
+            
+        duration = benchmark(fft_op)
+        # N*log(N) complexity, but we measure throughput
+        giga_elements = (data.numel()) / 1e9
+        throughput_geps = giga_elements / duration
+        
+        allure.attach(f"{throughput_geps:.2f} Giga-elements/sec", name="cuFFT (fftn) Throughput")
+        # FFTs are memory-bound
+        assert throughput_geps > 20, f"Low cuFFT throughput: {throughput_geps:.2f} Giga-elements/sec"        

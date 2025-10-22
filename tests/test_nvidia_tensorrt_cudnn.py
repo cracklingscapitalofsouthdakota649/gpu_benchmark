@@ -15,7 +15,13 @@ try:
 except Exception:
     TRT_AVAILABLE = False
 
-
+try:
+    import torch_geometric.nn as gnn
+    from torch_geometric.data import Data
+    GNN_AVAILABLE = True
+except ImportError:
+    GNN_AVAILABLE = False
+    
 # ───────────────────────────────────────────────────────────────
 # Utility functions
 # ───────────────────────────────────────────────────────────────
@@ -173,3 +179,195 @@ class TestNvidiaTensorRTandCuDNN:
         allure.attach(f"TensorRT: {duration_trt:.4f}s | PyTorch: {duration_torch:.4f}s | Speedup: {speedup:.2f}x",
                       name="TensorRT FP16 Speedup", attachment_type=allure.attachment_type.TEXT)
         assert speedup >= 1.5, f"TensorRT FP16 expected ≥1.5x speedup, got {speedup:.2f}x"
+
+    # ───────────────────────────────────────────────────────────────
+    # 4️. CUDA Graph Latency Speedup
+    # ───────────────────────────────────────────────────────────────
+    @allure.feature("NVIDIA CUDA Graphs")
+    @allure.story("Kernel Launch Overhead Reduction")
+    @pytest.mark.accelerator
+    def test_cuda_graph_latency_speedup(self, setup_device, benchmark):
+        """Compare looped inference latency vs. CUDA Graph 'replay' latency."""
+        device = setup_device
+        model = nn.Sequential(
+            nn.Linear(512, 1024), nn.ReLU(),
+            nn.Linear(1024, 1024), nn.ReLU(),
+            nn.Linear(1024, 512)
+        ).to(device)
+        model.eval()
+        data = torch.randn(128, 512, device=device)
+        
+        # 1. Baseline: Run in a standard Python loop (incurs launch overhead)
+        def baseline_loop():
+            for _ in range(100):
+                _ = model(data)
+            torch.cuda.synchronize()
+        
+        t_baseline = benchmark(baseline_loop)
+
+        # 2. CUDA Graph: Capture the graph once
+        graph = torch.cuda.CUDAGraph()
+        # Warmup
+        for _ in range(5):
+            _ = model(data)
+        
+        # Capture
+        with torch.cuda.graph(graph):
+            static_output = model(data)
+        
+        # 3. Replay: Run the captured graph (minimal overhead)
+        def graph_replay_loop():
+            for _ in range(100):
+                graph.replay()
+            torch.cuda.synchronize()
+
+        t_graph = benchmark(graph_replay_loop)
+        
+        speedup = t_baseline / t_graph if t_graph > 0 else 0
+        allure.attach(f"Baseline: {t_baseline*1000:.2f}ms | Graph: {t_graph*1000:.2f}ms | Speedup: {speedup:.2f}x",
+                      name="CUDA Graph Speedup (100 iterations)")
+        assert speedup > 2.0, f"Expected >2.0x speedup from CUDA Graphs, got {speedup:.2f}x"
+        
+    # ───────────────────────────────────────────────────────────────
+    # 5️. cuDNN BatchNorm Throughput
+    # ───────────────────────────────────────────────────────────────
+    @allure.feature("NVIDIA cuDNN")
+    @allure.story("BatchNorm Throughput Test")
+    @pytest.mark.accelerator
+    def test_cudnn_batchnorm_throughput(self, setup_device, benchmark):
+        """Benchmark cuDNN-accelerated BatchNorm2d forward/backward pass."""
+        device = setup_device
+        num_features = 256
+        batch_size = 128
+        img_size = 112
+        
+        # NCHW format
+        data = torch.randn(batch_size, num_features, img_size, img_size, 
+                           device=device, requires_grad=True)
+        bn_layer = nn.BatchNorm2d(num_features).to(device)
+        
+        def forward_backward_pass():
+            torch.cuda.synchronize()
+            start = time.perf_counter()
+            
+            # Forward pass
+            output = bn_layer(data)
+            
+            # Backward pass
+            grad_output = torch.randn_like(output)
+            output.backward(grad_output, retain_graph=True)
+            
+            torch.cuda.synchronize()
+            return time.perf_counter() - start
+
+        duration = benchmark(forward_backward_pass)
+        # Calculate in Giga-elements per second (processed twice: fwd + bwd)
+        total_elements = data.numel() * 2
+        throughput_geps = (total_elements / duration) / 1e9
+        
+        allure.attach(f"{throughput_geps:.2f} Giga-elements/sec", name="BatchNorm Fwd/Bwd Throughput")
+        assert throughput_geps > 50, f"Low BatchNorm throughput: {throughput_geps:.2f} Giga-elements/sec"
+        
+    # ───────────────────────────────────────────────────────────────
+    # 6️. torch.compile (Dynamo) Inference Speedup
+    # ───────────────────────────────────────────────────────────────
+    @allure.feature("NVIDIA torch.compile")
+    @allure.story("torch.compile vs Eager Speedup")
+    @pytest.mark.accelerator
+    def test_torch_compile_inference_speedup(self, setup_device, benchmark):
+        """Compare eager-mode inference vs. torch.compile() (Dynamo)."""
+        device = setup_device
+        
+        class SimpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(64, 128, 3, padding=1)
+                self.relu = nn.ReLU()
+                self.bn = nn.BatchNorm2d(128)
+            
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.relu(x)
+                x = self.bn(x)
+                return x
+
+        model = SimpleNet().to(device).eval()
+        
+        # 1. Compile the model
+        # mode="max-autotune" takes longer but gives best performance
+        try:
+            compiled_model = torch.compile(model, mode="max-autotune")
+        except Exception as e:
+            pytest.skip(f"torch.compile() failed, likely unsupported on this platform: {e}")
+            
+        data = torch.randn(64, 64, 56, 56, device=device)
+
+        # 2. Benchmark eager (standard) model
+        def eager_infer():
+            with torch.no_grad():
+                torch.cuda.synchronize()
+                start = time.perf_core()
+                _ = model(data)
+                torch.cuda.synchronize()
+                return time.perf_counter() - start
+        
+        t_eager = benchmark(eager_infer)
+
+        # 3. Benchmark compiled model
+        def compiled_infer():
+            with torch.no_grad():
+                torch.cuda.synchronize()
+                start = time.perf_counter()
+                _ = compiled_model(data)
+                torch.cuda.synchronize()
+                return time.perf_counter() - start
+        
+        t_compiled = benchmark(compiled_infer)
+        
+        speedup = t_eager / t_compiled if t_compiled > 0 else 0
+        allure.attach(f"Eager: {t_eager*1e6:.2f} µs | Compiled: {t_compiled*1e6:.2f} µs | Speedup: {speedup:.2f}x",
+                      name="torch.compile (Dynamo) Speedup")
+        assert speedup > 1.1, f"Expected >1.1x speedup from torch.compile, got {speedup:.2f}x"   
+
+    # ───────────────────────────────────────────────────────────────
+    # 7️. Graph Neural Network (GNN) Inference
+    # ───────────────────────────────────────────────────────────────
+    @allure.feature("NVIDIA GNN")
+    @allure.story("GNN (GCN) Inference Throughput")
+    @pytest.mark.accelerator
+    def test_gnn_inference_throughput(self, setup_device, benchmark):
+        """Benchmark a GCN layer forward pass, testing sparse gather ops."""
+        if not GNN_AVAILABLE:
+            pytest.skip("torch_geometric not installed (pip install torch-geometric).")
+            
+        device = setup_device
+        num_nodes = 500_000
+        num_edges = 2_000_000
+        in_features = 128
+        out_features = 128
+        
+        try:
+            # Create a large random graph and move it to GPU
+            node_features = torch.randn(num_nodes, in_features, device=device)
+            edge_index = torch.randint(0, num_nodes, (2, num_edges), device=device)
+            
+            # Create a GCNConv layer
+            model = gnn.GCNConv(in_features, out_features).to(device).eval()
+        except Exception as e:
+             pytest.skip(f"Could not allocate tensors for GNN test (OOM?): {e}")
+
+        def gnn_forward_pass():
+            with torch.no_grad():
+                torch.cuda.synchronize()
+                start = time.perf_counter()
+                # This performs sparse-dense matrix multiplication (SpMM)
+                _ = model(node_features, edge_index)
+                torch.cuda.synchronize()
+                return time.perf_counter() - start
+        
+        duration = benchmark(gnn_forward_pass)
+        # Throughput in M-edges/sec
+        throughput_meps = (num_edges / duration) / 1e6
+        
+        allure.attach(f"{throughput_meps:.2f} M-edges/sec", name="GCNConv Inference Throughput")
+        assert throughput_meps > 100, f"Low GNN throughput: {throughput_meps:.2f} M-edges/sec"        

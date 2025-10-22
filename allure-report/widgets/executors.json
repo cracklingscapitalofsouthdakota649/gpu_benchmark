@@ -1,1 +1,0 @@
-[{"name":"GPU Benchmark Executor","type":"CI_Pipeline","url":"${env.JENKINS_URL}","buildOrder":2,"buildName":"GPU Benchmark #2","buildUrl":"${env.BUILD_URL}","reportUrl":"${env.BUILD_URL}artifact/${ALLURE_REPORT_DIR}/index.html"}]
