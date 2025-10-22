@@ -129,8 +129,8 @@ gpu_benchmark/
 │  ├─ test_multi_gpu.py       # Multi-GPU/DDP/parallel tests
 │  ├─ test_network_io_accelerator.py # Network/distributed I/O
 │  ├─ test_nvidia_gpu_accelerator.py # NVIDIA-specific features
-│  ├─ test_nvidia_real_gpu.py # Comprehensive real-world benchmarks
-│  ├─ test_nvidia_tensorrt_cudnn.py # TensorRT/cuDNN acceleration
+│  ├─ test_nvidia_real_gpu.py # NVIDIA Comprehensive real-world benchmarks
+│  ├─ test_nvidia_tensorrt_cudnn.py # NVIDIA TensorRT/cuDNN acceleration
 │  └─ test_parallel_training.py # Data/model parallelism speed
 ├─ venv310/                   # Virtual environment (auto-created)
 ├─ allure-results/            # Benchmark reports
