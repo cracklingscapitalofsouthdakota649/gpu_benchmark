@@ -76,9 +76,9 @@ jobs:
             fi
             
             # Run Pytest
-            pytest -v tests/test_parallel_training.py --alluredir="$RESULTS_DIR" --import-mode=importlib
+            #pytest -v tests/test_parallel_training.py --alluredir="$RESULTS_DIR" --import-mode=importlib
             #pytest -v --alluredir="$RESULTS_DIR" --import-mode=importlib
-            #pytest -v tests/test_io_accelerator.py --alluredir="$RESULTS_DIR" --import-mode=importlib
+            pytest -v tests/test_io_accelerator.py --alluredir="$RESULTS_DIR" --import-mode=importlib
             TEST_EXIT_CODE=$?
             
             # 1. Check if results directory exists and has files (most critical check)
