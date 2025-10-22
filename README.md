@@ -1,7 +1,10 @@
 # 🤖 GPU/CPU Benchmark Suite
 
-A robust benchmarking framework for evaluating GPU and CPU performance using PyTorch, pytest, and Allure reporting.  
-Supports NVIDIA, AMD, Intel, DirectML, and CPU-only execution, with performance metrics and interactive dashboards.
+**A Universal Benchmarking Framework for PyTorch Performance.**
+
+Evaluate and compare GPU and CPU performance with unparalleled accuracy using PyTorch, pytest, and detailed Allure reporting. This robust framework offers 
+out-of-the-box support for heterogeneous hardware, including NVIDIA, AMD, Intel, DirectML, and standard CPU-only execution. Generate clear performance metrics 
+and interactive dashboards to quickly identify bottlenecks and optimize model execution across any accelerator.
 
 ---
 
