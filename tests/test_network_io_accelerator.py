@@ -3,6 +3,7 @@
 
 import os
 import re
+import gc
 import pytest
 import time
 import socket
@@ -14,6 +15,15 @@ import allure
 import numpy as np
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+
+# ───────────────────────────────────────────────────────────────
+# Optional torch import for GPU cache management
+# ───────────────────────────────────────────────────────────────
+try:
+    import torch
+except ImportError:
+    torch = None
+
 
 # ───────────────────────────────────────────────────────────────
 # Detection Utilities
@@ -57,6 +67,22 @@ def detect_network_accelerators():
 
 @pytest.mark.network_io
 class TestNetworkIOAccelerator:
+    @pytest.fixture(autouse=True)
+    def cleanup_between_tests(self):
+        """
+        Automatically clear GPU/CPU memory cache and perform garbage collection
+        before and after each test to prevent resource leaks and hangs.
+        """
+        # Before test
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+        yield
+        # After test
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
     @pytest.fixture(scope="class", autouse=True)
     def hardware_info(self):
         """Detect available network I/O accelerators once."""
@@ -176,7 +202,6 @@ class TestNetworkIOAccelerator:
     @pytest.mark.network_io_accelerator
     @allure.feature("Network I/O Accelerator")
     @allure.story("Stability Over Time")
-    @pytest.mark.asyncio
     def test_network_stability(self, benchmark):
         """Run repeated ping over 30 seconds and track packet loss."""
         host = "8.8.8.8"
