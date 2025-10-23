@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gpu_benchmark.py — Unified benchmark runner with proper Allure trend support.
+gpu_benchmark.py — Unified benchmark runner with Allure telemetry trend support.
 """
 
 import os
@@ -11,15 +11,15 @@ import psutil
 import json
 import time
 import shutil
+import signal
+
+from supports.performance_trend import update_performance_trend, plot_trend_chart
 
 try:
     import pyopencl as cl
 except ImportError:
     cl = None
 
-# --------------------------
-# Configuration
-# --------------------------
 ALLURE_RESULTS = "allure-results"
 ALLURE_REPORT = "allure-report"
 SUPPORT_DIR = "supports"
@@ -27,16 +27,18 @@ TARGET_PYTHON_VERSION = "3.10"
 
 
 # --------------------------
-# Find & Switch Python
+# Python Version Management
 # --------------------------
 def find_python_executable(version=TARGET_PYTHON_VERSION):
-    """Locate a Python executable matching the version."""
+    """Find specific Python version on Windows or *nix."""
     try:
         if sys.platform.startswith("win"):
-            cmd = ['py', f'-{version}', '-c', 'import sys;print(sys.executable)']
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                ["py", f"-{version}", "-c", "import sys;print(sys.executable)"],
+                capture_output=True, text=True, check=True, timeout=5
+            )
             path = result.stdout.strip()
-            if os.path.exists(path):
+            if path and os.path.exists(path):
                 return path
         else:
             name = f"python{version}"
@@ -50,19 +52,31 @@ def find_python_executable(version=TARGET_PYTHON_VERSION):
         pass
     return sys.executable
 
-
 def ensure_python310():
-    """Re-run silently with Python 3.10 (no CMD echo)."""
+    """Re-run under Python 3.10 quietly and wait until it finishes."""
     if not sys.version.startswith(TARGET_PYTHON_VERSION):
         py_path = find_python_executable(TARGET_PYTHON_VERSION)
-        if py_path and py_path != sys.executable:
-            os.environ["PYTHONUNBUFFERED"] = "1"
-            # use os.execve instead of execv to suppress command echo
+        if not py_path or py_path == sys.executable:
+            return
+
+        print(f"[INFO] Switching to Python {TARGET_PYTHON_VERSION}: {py_path}")
+
+        if sys.platform.startswith("win"):
+            # Build quoted argument list safely
+            args_str = " ".join([f'"{a}"' for a in sys.argv])
+            ps_cmd = f'& "{py_path}" {args_str}'
+
+            # Run invisibly but wait until completion
+            subprocess.run(
+                ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_cmd],
+                check=False,
+            )
+            sys.exit(0)
+        else:
             os.execve(py_path, [py_path] + sys.argv, os.environ)
 
-
 # --------------------------
-# System Info Detection
+# Hardware Info
 # --------------------------
 def detect_cpu_info():
     try:
@@ -77,8 +91,8 @@ def detect_cpu_info():
             with open("/proc/cpuinfo") as f:
                 for line in f:
                     if "model name" in line:
-                        return line.split(":")[1].strip()
-        return platform.processor()
+                        return line.split(":", 1)[1].strip()
+        return platform.processor() or "Unknown CPU"
     except Exception:
         return "Unknown CPU"
 
@@ -120,7 +134,7 @@ def detect_gpu_info():
 
 
 # --------------------------
-# Allure Environment Writer
+# Allure Utilities
 # --------------------------
 def write_environment_properties(build_number):
     dest_dir = os.path.join(ALLURE_RESULTS, str(build_number))
@@ -141,14 +155,21 @@ def write_environment_properties(build_number):
     print(f"[INFO] OS: {os_name}")
 
 
-# --------------------------
-# Allure Support
-# --------------------------
+def ensure_categories(dest_dir):
+    src = os.path.join(SUPPORT_DIR, "categories.json")
+    dest = os.path.join(dest_dir, "categories.json")
+    os.makedirs(dest_dir, exist_ok=True)
+    if os.path.exists(src):
+        shutil.copy(src, dest)
+    else:
+        default = [
+            {"name": "Performance", "matchedStatuses": ["passed"], "messageRegex": ".*"},
+            {"name": "Failures", "matchedStatuses": ["failed"], "messageRegex": ".*"},
+        ]
+        with open(dest, "w", encoding="utf-8") as f:
+            json.dump(default, f, indent=2)
 
-def copy_categories(dest_dir):
-    shutil.copy(os.path.join(SUPPORT_DIR, "categories.json"), dest_dir)
-    print("[INFO] Copied categories.json to allure-results/")
-    
+
 def update_executor_json(build_number):
     path = os.path.join(ALLURE_RESULTS, str(build_number), "executor.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -157,13 +178,11 @@ def update_executor_json(build_number):
         "type": "local",
         "buildOrder": str(build_number),
         "buildName": f"GPU Benchmark #{build_number}",
-        "reportUrl": "",
-        "buildUrl": "",
         "description": f"Automated GPU/CPU benchmark build {build_number}"
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    
+
 
 def copy_history(build_number):
     latest = os.path.join(ALLURE_RESULTS, "latest", "history")
@@ -174,28 +193,8 @@ def copy_history(build_number):
         os.makedirs(dest, exist_ok=True)
 
 
-def save_latest(build_number):
-    """Preserve latest results & history for Allure trend."""
-    latest_dir = os.path.join(ALLURE_RESULTS, "latest")
-    build_dir = os.path.join(ALLURE_RESULTS, str(build_number))
-    report_history = os.path.join(ALLURE_REPORT, "history")
-
-    if os.path.exists(latest_dir):
-        shutil.rmtree(latest_dir)
-    shutil.copytree(build_dir, latest_dir, dirs_exist_ok=True)
-
-    hist_dir = os.path.join(latest_dir, "history")
-    os.makedirs(hist_dir, exist_ok=True)
-
-    # Copy Allure's own trend JSONs if they exist
-    if os.path.exists(report_history):
-        for file in os.listdir(report_history):
-            if file.endswith(".json"):
-                shutil.copy(os.path.join(report_history, file), hist_dir)
-
-
 # --------------------------
-# Pytest Runner
+# Pytest Runner (with signal forwarding)
 # --------------------------
 def run_pytest(build_number, suite):
     results_dir = os.path.join(ALLURE_RESULTS, str(build_number))
@@ -207,26 +206,35 @@ def run_pytest(build_number, suite):
         f"--alluredir={results_dir}"
     ]
     print(f"[INFO] Running pytest suite: {suite.upper()}")
-    return subprocess.run(pytest_cmd).returncode
+
+    # Graceful SIGINT handling
+    process = subprocess.Popen(pytest_cmd)
+    try:
+        process.wait()
+    except KeyboardInterrupt:
+        print("\n[WARN] Ctrl+C detected — terminating benchmark...")
+        process.send_signal(signal.SIGINT)
+        process.wait()
+    return process.returncode
 
 
 # --------------------------
-# Allure Report
+# Allure Reporting
 # --------------------------
 def generate_allure_report(build_number):
     results_dir = os.path.join(ALLURE_RESULTS, str(build_number))
     allure_bin = shutil.which("allure") or shutil.which("allure.cmd")
     if not allure_bin:
-        print("[WARN] Allure CLI not found. Install with Scoop or npm.")
+        print("[WARN] Allure CLI not found. Install it via Scoop or npm.")
         return
-    subprocess.run([allure_bin, "generate", results_dir, "-o", ALLURE_REPORT, "--clean"],
-                   shell=False, check=False)
+    subprocess.run([allure_bin, "generate", results_dir, "-o", ALLURE_REPORT, "--clean"])
+    print(f"[INFO] Report generated to {ALLURE_REPORT}")
 
 
 def open_allure_report():
     allure_bin = shutil.which("allure") or shutil.which("allure.cmd")
     if allure_bin:
-        subprocess.Popen([allure_bin, "open", ALLURE_REPORT], shell=False)
+        subprocess.Popen([allure_bin, "open", ALLURE_REPORT])
 
 
 # --------------------------
@@ -238,28 +246,40 @@ def main():
         print("Usage: python gpu_benchmark.py <Build_Number> [suite]")
         sys.exit(1)
 
-    build = sys.argv[1]
+    build_number = sys.argv[1]
     suite = sys.argv[2] if len(sys.argv) > 2 else "gpu"
 
     print("=" * 80)
-    print(f" Starting GPU Benchmark Suite | Build #{build} | Suite: {suite.upper()} ")
+    print(f" Starting GPU Benchmark Suite | Build #{build_number} | Suite: {suite.upper()} ")
     print("=" * 80)
 
-    results_dir = os.path.join(ALLURE_RESULTS, str(build))
+    results_dir = os.path.join(ALLURE_RESULTS, str(build_number))
     os.makedirs(results_dir, exist_ok=True)
 
-    copy_categories(results_dir)
-    copy_history(build)
-    update_executor_json(build)
-    write_environment_properties(build)
+    ensure_categories(results_dir)
+    copy_history(build_number)
+    update_executor_json(build_number)
+    write_environment_properties(build_number)
 
     start = time.time()
-    rc = run_pytest(build, suite)
-    dur = round(time.time() - start, 2)
-    print(f"[INFO] Test execution completed in {dur}s (exit={rc}).")
+    rc = run_pytest(build_number, suite)
+    print(f"[INFO] Test execution completed in {round(time.time() - start, 2)}s (exit={rc}).")
 
-    generate_allure_report(build)
-    save_latest(build)
+    generate_allure_report(build_number)
+
+    # --- Performance Trend ---
+    trend = update_performance_trend(
+        build_number,
+        results_dir=ALLURE_RESULTS,
+        history_dir=os.path.join(ALLURE_REPORT, "history")
+    )
+    if trend:
+        chart = plot_trend_chart(trend, os.path.join(ALLURE_RESULTS, str(build_number)), build_number)
+        if chart and os.path.exists(chart):
+            print(f"[INFO] Trend chart generated: {chart}")
+    else:
+        print("[WARN] No telemetry data found for trend (check supports/telemetry_hook).")
+
     open_allure_report()
     sys.exit(rc)
 
