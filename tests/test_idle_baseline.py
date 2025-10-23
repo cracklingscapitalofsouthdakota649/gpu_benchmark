@@ -16,7 +16,7 @@ def test_idle_baseline():
     dev_type = pick_device()
     device = get_device(dev_type)
     metrics_monitor = SystemMetrics(device)
-
+    
     results = []
     for i in range(10):
         metrics = metrics_monitor.get_all_metrics()
@@ -24,5 +24,10 @@ def test_idle_baseline():
         results.append(metrics)
         time.sleep(0.3)
 
+    # Calculate and attach the final metric (Average GPU Utilization) for trending
+    avg_gpu_util = sum(m.get("gpu_util", 0) for m in results) / len(results)
+    allure.attach(f"{avg_gpu_util:.2f}", name="Avg Idle GPU Util (%)", attachment_type=allure.attachment_type.TEXT) # ⬅️ ADDED
+    
+    # Attach raw data and chart
     allure.attach(json.dumps(results, indent=2), "Idle Baseline", allure.attachment_type.JSON)
     attach_chart_to_allure(results)

@@ -23,9 +23,8 @@ def worker(thread_id, results, lock, metrics_monitor, dev_type, device):
             results.append(metrics)
         time.sleep(0.1)
 
-
-@allure.feature("System Parallelism") # ⬅️ ADDED
-@allure.story("Multi-Threaded Load Test") # ⬅️ ADDED
+@allure.feature("System Parallelism")
+@allure.story("Multi-Threaded Load Test")
 @pytest.mark.gpu
 @pytest.mark.cpu
 @pytest.mark.benchmark
@@ -46,10 +45,11 @@ def test_parallel_training():
     for t in threads:
         t.join()
 
-    # Sort & add step
-    results.sort(key=lambda m: m.get("thread", 0))
-    for i, m in enumerate(results):
-        m["step"] = i
+    # Calculate and attach the final metric (Average GPU Utilization) for trending
+    if results:
+        avg_gpu_util = sum(m.get("gpu_util", 0) for m in results) / len(results)
+        allure.attach(f"{avg_gpu_util:.2f}", name="Avg Parallel GPU Util (%)", attachment_type=allure.attachment_type.TEXT) # ⬅️ ADDED
 
-    allure.attach(json.dumps(results, indent=2), "Parallel Training Metrics", allure.attachment_type.JSON)
+    # Attach raw data and chart
+    allure.attach(json.dumps(results, indent=2), "Parallel Load Metrics", allure.attachment_type.JSON)
     attach_chart_to_allure(results)

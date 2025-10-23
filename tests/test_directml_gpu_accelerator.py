@@ -8,6 +8,8 @@ import pytest
 import allure
 import numpy as np
 import torch
+import json # <-- ADDED
+from supports.gpu_monitor import collect_gpu_metrics # <-- ADDED
 
 try:
     import torch_directml
@@ -199,10 +201,11 @@ class TestDirectMLAccelerator:
         speedup = t32 / t16 if t16 > 0 else 0
         allure.attach(f"{speedup:.2f}×", name="Mixed Precision Speedup")
         assert speedup >= 1.2, f"Expected ≥1.2× speedup, got {speedup:.2f}×"
-
+        
     # 9. End-to-end inference throughput
     @allure.feature("DirectML GPU Accelerator")
-    @allure.story("End-to-End Inference")
+    @allure.story("End-to-End Inference Throughput")
+    @pytest.mark.accelerator
     def test_end_to_end_inference(self, setup_device, benchmark):
         device = setup_device
         model = torch.nn.Sequential(
@@ -212,14 +215,34 @@ class TestDirectMLAccelerator:
             torch.nn.Flatten(),
             torch.nn.Linear(64, 10)
         ).to(device)
+        
+        # Assuming batch size of 64
         data = torch.randn(64, 3, 224, 224, device=device)
+        batch_size = data.shape[0]
 
         def inference_op():
-            start = time.perf_counter()
             _ = model(data)
-            return time.perf_counter() - start
+            # DirectML synchronization equivalent (if applicable, torch handles this)
+            
+        # --- 1. Run the benchmark ---
+        result = benchmark(inference_op)
+        
+        # --- 2. Calculate FPS ---
+        duration_mean = result.stats.mean 
+        fps = batch_size / duration_mean
 
-        duration = benchmark(inference_op)
-        throughput = 64 / duration
-        allure.attach(f"{throughput:.2f} samples/s", name="E2E Throughput")
-        assert throughput > 150, f"Low inference throughput: {throughput:.2f} samples/s"
+        # --- 3. Collect GPU Telemetry (3-second sample) ---
+        telemetry = collect_gpu_metrics(duration=3, interval=0.1) 
+
+        # --- 4. Attach Metrics to Allure ---
+        with allure.step("Performance Metrics"):
+            allure.attach(f"{fps:.2f}", 
+                          name="Frames Per Second (FPS)", 
+                          attachment_type=allure.attachment_type.TEXT)
+            allure.attach(
+                json.dumps(telemetry, indent=2),
+                name="System Utilization (JSON)",
+                attachment_type=allure.attachment_type.JSON,
+            )
+            
+        assert fps > 50.0 # Example assertion

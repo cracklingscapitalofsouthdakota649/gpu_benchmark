@@ -18,5 +18,7 @@ def test_tensor_operations_benchmark(benchmark):
         torch.cuda.synchronize() if torch.cuda.is_available() else None
         return z
 
+    # FAILED LINE ⬇️ (Returns a Tensor)
     result = benchmark(compute)
+    # FAILED LINE ⬆️ (External tooling likely tries to access result.stats)
     assert result is not None

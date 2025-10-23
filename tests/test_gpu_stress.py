@@ -42,7 +42,7 @@ def test_gpu_stress():
 
     # Attach metrics
     allure.attach(json.dumps(results, indent=2), "Stress Metrics", allure.attachment_type.JSON)
-    attach_chart_to_allure(results)
+    attach_chart_to_allure(results) # Assuming this function exists
 
     # Summary
     avg_gpu = sum(m.get("gpu_util", 0) for m in results) / len(results)

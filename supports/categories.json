@@ -55,15 +55,15 @@
         "messageRegex": ".*(stress.*fail\nGPU crash\nthermal\nsystem unstable).*"
     },
     {
-        "name": "✅ Passed Benchmarks",
-        "description": "All performance tests executed successfully and met expectations.",
-        "matchedStatuses": ["passed"]
-    },
-    {
         "name": "📦 Missing Dependency Errors",
         "description": "Failures caused by missing pytest dependencies such as colorama, exceptiongroup, iniconfig, packaging, pygments, tomli, and py-cpuinfo.",
         "matchedStatuses": ["broken"],
         "messageRegex": ".*(No module named 'colorama'|No module named 'exceptiongroup'|No module named 'iniconfig'|No module named 'packaging'|No module named 'pygments'|No module named 'tomli'|No module named 'py_cpuinfo').*"
+    },
+	    {
+        "name": "✅ Passed Benchmarks",
+        "description": "All performance tests executed successfully and met expectations.",
+        "matchedStatuses": ["passed"]
     }
+	
 ]
-``

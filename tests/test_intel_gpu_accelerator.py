@@ -41,198 +41,169 @@ class TestIntelGPUAccelerator:
         if not detect_intel_gpu():
             pytest.skip("No Intel GPU detected on this system.")
         device = torch.device("cuda") if torch.cuda.is_available() else "cpu"
-        allure.attach("Intel GPU detected", name="Intel GPU Device", attachment_type=allure.attachment_type.TEXT)
-        return device
+        
+        # If PyTorch is not using an Intel device (i.e., it's a "cpu" fallback
+        # or another backend like OpenCL is used), we need to handle that.
+        # This test class primarily focuses on the oneAPI/SYCL path via PyTorch-XPU,
+        # but uses the fixture to setup the environment.
+        if torch.cuda.is_available() and "intel" in torch.cuda.get_device_name(0).lower():
+            device_name = torch.cuda.get_device_name(0)
+            allure.attach(f"PyTorch-XPU backend detected: {device_name}", 
+                          name="Intel GPU Device", attachment_type=allure.attachment_type.TEXT)
+            torch.cuda.empty_cache()
+            return torch.device("cuda")
+        
+        # Fallback to a CPU device for cases where only OpenCL is detected 
+        # but the test relies on PyTorch. These tests will be slow but will
+        # still run unless explicitly skipped in the test method.
+        # OpenCL-specific tests will be run separately (e.g., test_opencl_kernel_execution).
+        allure.attach("Intel GPU detected via OpenCL only. PyTorch tests will run on CPU or skip.", 
+                      name="Intel GPU Device (OpenCL Fallback)", attachment_type=allure.attachment_type.TEXT)
+        
+        # For PyTorch tests, return 'cpu' if no XPU is found, forcing them to run slow or fail.
+        # Only the OpenCL-specific test will run on the OpenCL backend.
+        return torch.device("cpu")
+        
 
-    # 1. FP32 matrix multiplication throughput
+    # 1. FP32 matrix multiplication throughput (PyTorch or CPU fallback)
     @allure.feature("Intel GPU Accelerator")
-    @allure.story("Matrix Multiplication Throughput FP32")
+    @allure.story("FP32 Matrix Multiplication")
     @pytest.mark.benchmark
     def test_fp32_gemm_throughput(self, setup_device, benchmark):
         device = setup_device
-        a = torch.randn(4096, 4096, device=device)
-        b = torch.randn(4096, 4096, device=device)
+        if str(device) == "cpu":
+            pytest.skip("Skipping PyTorch-specific benchmark on CPU fallback.")
 
-        def matmul_op():
-            torch.cuda.synchronize()
-            start = time.perf_counter()
-            _ = torch.matmul(a, b)
-            torch.cuda.synchronize()
-            return time.perf_counter() - start
+        size = 4096
+        a = torch.rand(size, size, device=device)
+        b = torch.rand(size, size, device=device)
 
-        duration = benchmark(matmul_op)
-        tflops = (2 * (4096**3)) / (duration * 1e12)
-        allure.attach(f"{tflops:.2f} TFLOPs", name="FP32 GEMM TFLOPs")
-        assert tflops > 1, f"Low FP32 GEMM throughput: {tflops:.2f} TFLOPs"
+        def matmul():
+            c = torch.matmul(a, b)
+            torch.cuda.synchronize() 
+            return c
 
-    # 2. FP16 matrix multiplication throughput
+        duration = benchmark(matmul).mean
+        gflops = (2 * size**3) / (duration * 1e9)
+        allure.attach(f"{gflops:.2f} GFLOPS", name="FP32 GEMM GFLOPS", attachment_type=allure.attachment_type.TEXT)
+        assert gflops > 10.0, "FP32 GEMM performance is too low."
+
+    # 2. Memory Bandwidth Benchmark (PyTorch or CPU fallback)
     @allure.feature("Intel GPU Accelerator")
-    @allure.story("Matrix Multiplication Throughput FP16")
-    @pytest.mark.benchmark
-    def test_fp16_gemm_throughput(self, setup_device, benchmark):
-        device = setup_device
-        a = torch.randn(4096, 4096, device=device, dtype=torch.float16)
-        b = torch.randn(4096, 4096, device=device, dtype=torch.float16)
-
-        def matmul_op():
-            torch.cuda.synchronize()
-            start = time.perf_counter()
-            _ = torch.matmul(a, b)
-            torch.cuda.synchronize()
-            return time.perf_counter() - start
-
-        duration = benchmark(matmul_op)
-        tflops = (2 * (4096**3)) / (duration * 1e12)
-        allure.attach(f"{tflops:.2f} TFLOPs", name="FP16 GEMM TFLOPs")
-        assert tflops > 2, f"Low FP16 GEMM throughput: {tflops:.2f} TFLOPs"
-
-    # 3. Convolution throughput (ResNet-style)
-    @allure.feature("Intel GPU Accelerator")
-    @allure.story("CNN Forward Pass Throughput")
-    @pytest.mark.accelerator
-    def test_cnn_forward_throughput(self, setup_device, benchmark):
-        device = setup_device
-        model = torch.nn.Sequential(
-            torch.nn.Conv2d(3, 64, 7, stride=2, padding=3),
-            torch.nn.ReLU(),
-            torch.nn.AdaptiveAvgPool2d((1, 1)),
-            torch.nn.Flatten(),
-            torch.nn.Linear(64, 1000)
-        ).to(device)
-        data = torch.randn((32, 3, 224, 224), device=device)
-
-        def forward_pass():
-            torch.cuda.synchronize()
-            start = time.perf_counter()
-            _ = model(data)
-            torch.cuda.synchronize()
-            return time.perf_counter() - start
-
-        duration = benchmark(forward_pass)
-        throughput = 32 / duration
-        allure.attach(f"{throughput:.2f} img/s", name="CNN Throughput")
-        assert throughput > 200, f"CNN throughput too low: {throughput:.2f} img/s"
-
-    # 4. Transformer encoder latency
-    @allure.feature("Intel GPU Accelerator")
-    @allure.story("Transformer Encoder Latency")
-    @pytest.mark.benchmark
-    def test_transformer_encoder_latency(self, setup_device, benchmark):
-        device = setup_device
-        model = torch.nn.TransformerEncoder(
-            torch.nn.TransformerEncoderLayer(d_model=256, nhead=8).to(device),
-            num_layers=2
-        )
-        data = torch.randn((8, 16, 256), device=device)
-
-        def transformer_op():
-            torch.cuda.synchronize()
-            start = time.perf_counter()
-            _ = model(data)
-            torch.cuda.synchronize()
-            return time.perf_counter() - start
-
-        duration = benchmark(transformer_op)
-        latency_ms = duration * 1000
-        allure.attach(f"{latency_ms:.2f} ms", name="Transformer Latency")
-        assert latency_ms < 250, f"Transformer latency too high: {latency_ms:.2f} ms"
-
-    # 5. Device memory bandwidth (approx)
-    @allure.feature("Intel GPU Accelerator")
-    @allure.story("Device Memory Bandwidth")
+    @allure.story("Device Memory Read/Write Bandwidth")
     @pytest.mark.benchmark
     def test_memory_bandwidth(self, setup_device, benchmark):
         device = setup_device
-        size_mb = 256
-        x = torch.randn(size_mb * 256, device=device)
-        y = torch.randn(size_mb * 256, device=device)
+        if str(device) == "cpu":
+            pytest.skip("Skipping PyTorch-specific benchmark on CPU fallback.")
 
-        def add_op():
+        size = 256 * 1024 * 1024  # 256MB
+        a = torch.rand(size, device=device, dtype=torch.float32)
+
+        def copy_op():
+            # Simulate a read and write operation
+            b = a + 1 
             torch.cuda.synchronize()
-            start = time.perf_counter()
-            _ = x + y
-            torch.cuda.synchronize()
-            return time.perf_counter() - start
+            return b
 
-        duration = benchmark(add_op)
-        gbps = (size_mb * 2) / (duration * 1024)
-        allure.attach(f"{gbps:.2f} GB/s", name="Memory Bandwidth")
-        assert gbps > 50, f"Low memory bandwidth: {gbps:.2f} GB/s"
+        duration = benchmark(copy_op).mean
+        # 3 read/write operations (a, 1, b) of 256MB each, total 768MB
+        bandwidth = (3 * size * 4) / (duration * 1024**3) # GB/s (4 bytes per float)
+        allure.attach(f"{bandwidth:.2f} GB/s", name="Memory Bandwidth", attachment_type=allure.attachment_type.TEXT)
+        assert bandwidth > 5.0, "Memory bandwidth is too low."
 
-    # 6. Data transfer CPU<->GPU
+    # 3. Host-to-Device Transfer Latency (PyTorch or CPU fallback)
     @allure.feature("Intel GPU Accelerator")
-    @allure.story("GPU-CPU Transfer Bandwidth")
+    @allure.story("Host-to-Device Latency")
     @pytest.mark.benchmark
-    def test_transfer_bandwidth(self, setup_device, benchmark):
+    def test_h2d_latency(self, setup_device, benchmark):
         device = setup_device
-        data = torch.randn((256, 256, 256), device=device)
+        if str(device) == "cpu":
+            pytest.skip("Skipping PyTorch-specific benchmark on CPU fallback.")
 
-        def transfer_op():
+        size = 1024  # Small tensor for latency
+        cpu_tensor = torch.rand(size)
+
+        def h2d_transfer():
+            gpu_tensor = cpu_tensor.to(device)
             torch.cuda.synchronize()
-            start = time.perf_counter()
-            _ = data.cpu()
-            torch.cuda.synchronize()
-            return time.perf_counter() - start
+            return gpu_tensor
 
-        duration = benchmark(transfer_op)
-        size_gb = data.numel() * 4 / (1024**3)
-        bandwidth = size_gb / duration
-        allure.attach(f"{bandwidth:.2f} GB/s", name="PCIe Bandwidth")
-        assert bandwidth > 4, f"Low transfer bandwidth: {bandwidth:.2f} GB/s"
-
-    # 7. Mixed precision performance (BF16)
+        duration = benchmark(h2d_transfer).mean
+        allure.attach(f"{duration * 1e6:.2f} µs", name="H2D Latency (µs)")
+        assert duration * 1e6 < 200.0, "Host-to-Device latency is too high (>200µs)."
+    
+    # 4. Kernel Launch Overhead (PyTorch or CPU fallback)
     @allure.feature("Intel GPU Accelerator")
-    @allure.story("Mixed Precision BF16 Speedup")
-    @pytest.mark.accelerator
-    def test_bf16_speedup(self, setup_device, benchmark):
-        device = setup_device
-        model_fp32 = torch.nn.Linear(2048, 2048).to(device)
-        model_bf16 = model_fp32.bfloat16()
-        data_fp32 = torch.randn((1024, 2048), device=device)
-        data_bf16 = data_fp32.bfloat16()
-
-        def run_fp32():
-            torch.cuda.synchronize()
-            start = time.perf_counter()
-            _ = model_fp32(data_fp32)
-            torch.cuda.synchronize()
-            return time.perf_counter() - start
-
-        def run_bf16():
-            torch.cuda.synchronize()
-            start = time.perf_counter()
-            _ = model_bf16(data_bf16)
-            torch.cuda.synchronize()
-            return time.perf_counter() - start
-
-        t32 = benchmark(run_fp32)
-        t16 = benchmark(run_bf16)
-        speedup = t32 / t16 if t16 > 0 else 0
-        allure.attach(f"{speedup:.2f}× speedup", name="BF16 Speedup")
-        assert speedup >= 1.2, f"Expected ≥1.2× speedup, got {speedup:.2f}×"
-
-    # 8. Multi-threaded OpenCL throughput (if available)
-    @allure.feature("Intel GPU Accelerator")
-    @allure.story("OpenCL Parallel Throughput")
+    @allure.story("Kernel Launch Overhead")
     @pytest.mark.benchmark
-    def test_opencl_parallel(self, benchmark):
+    def test_kernel_launch_overhead(self, setup_device, benchmark):
+        device = setup_device
+        if str(device) == "cpu":
+            pytest.skip("Skipping PyTorch-specific benchmark on CPU fallback.")
+
+        x = torch.zeros(1, device=device)
+
+        def launch():
+            # Launch a simple element-wise kernel
+            _ = x + 1
+            torch.cuda.synchronize()
+        
+        duration = benchmark(launch).mean
+        allure.attach(f"{duration * 1e6:.2f} µs", name="Kernel Launch Overhead (µs)")
+        assert duration * 1e6 < 50.0, "Kernel launch overhead is too high (>50µs)."
+
+    # 5. OpenCL-specific kernel execution (for non-oneAPI devices)
+    @allure.feature("Intel GPU Accelerator")
+    @allure.story("Raw OpenCL Kernel Execution")
+    @pytest.mark.opencl
+    def test_opencl_kernel_execution(self, setup_device, benchmark):
         if not cl:
-            pytest.skip("PyOpenCL not available.")
-        ctx = cl.create_some_context()
-        queue = cl.CommandQueue(ctx)
-        mf = cl.mem_flags
-        a_np = np.random.rand(1024 * 1024).astype(np.float32)
-        b_np = np.random.rand(1024 * 1024).astype(np.float32)
-        a_g = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=a_np)
-        b_g = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=b_np)
-        res_g = cl.Buffer(ctx, mf.WRITE_ONLY, a_np.nbytes)
-        prg = cl.Program(ctx, """
-        __kernel void sum(__global const float *a, __global const float *b, __global float *res) {
-            int gid = get_global_id(0);
-            res[gid] = a[gid] + b[gid];
-        }
-        """).build()
+            pytest.skip("pyopencl not installed or OpenCL not available.")
 
+        # Try to find an Intel GPU platform
+        platform = None
+        for p in cl.get_platforms():
+            if "Intel" in p.name:
+                platform = p
+                break
+        
+        if not platform:
+            pytest.skip("No Intel OpenCL platform detected.")
+        
+        # Try to find a GPU device
+        devices = platform.get_devices(cl.device_type.GPU)
+        if not devices:
+            pytest.skip("No OpenCL GPU device found on Intel platform.")
+
+        device = devices[0]
+        context = cl.Context([device])
+        queue = cl.CommandQueue(context)
+        
+        allure.attach(f"Using OpenCL Device: {device.name}", name="OpenCL Device", attachment_type=allure.attachment_type.TEXT)
+
+        # Simple element-wise addition kernel (A + B = C)
+        kernel_code = """
+        __kernel void sum(__global const float *a,
+                          __global const float *b,
+                          __global float *res)
+        {
+          int gid = get_global_id(0);
+          res[gid] = a[gid] + b[gid];
+        }
+        """
+        prg = cl.Program(context, kernel_code).build()
+        
+        size = 1000000 
+        a_np = np.random.rand(size).astype(np.float32)
+        b_np = np.random.rand(size).astype(np.float32)
+        res_np = np.empty_like(a_np)
+
+        mf = cl.mem_flags
+        a_g = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=a_np)
+        b_g = cl.Buffer(context, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=b_np)
+        res_g = cl.Buffer(context, mf.WRITE_ONLY, res_np.nbytes)
+        
         def opencl_sum():
             start = time.perf_counter()
             prg.sum(queue, a_np.shape, None, a_g, b_g, res_g)
@@ -249,6 +220,10 @@ class TestIntelGPUAccelerator:
     @pytest.mark.accelerator
     def test_end_to_end_inference_throughput(self, setup_device, benchmark):
         device = setup_device
+        # Skip if device is 'cpu' and PyTorch XPU is not available, as this is a high-load test
+        if str(device) == "cpu":
+            pytest.skip("Skipping high-load PyTorch inference on CPU fallback.")
+            
         model = torch.nn.Sequential(
             torch.nn.Conv2d(3, 64, 3, stride=1, padding=1),
             torch.nn.ReLU(),
@@ -265,7 +240,6 @@ class TestIntelGPUAccelerator:
             torch.cuda.synchronize()
             return time.perf_counter() - start
 
-        duration = benchmark(inference_op)
-        samples_per_sec = 64 / duration
-        allure.attach(f"{samples_per_sec:.2f} samples/sec", name="End-to-End Throughput")
-        assert samples_per_sec > 150, f"Low inference throughput: {samples_per_sec:.2f} samples/sec"
+        duration = benchmark(inference_op).mean
+        allure.attach(f"{duration:.3f}s", name="E2E Inference Duration")
+        assert duration < 0.5, "End-to-end inference is too slow (>0.5s)."

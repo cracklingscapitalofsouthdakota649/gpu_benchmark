@@ -15,8 +15,9 @@ and interactive dashboards to quickly identify bottlenecks and optimize model ex
 ---
 
 ## 💡 Project Overview  
-This framework implements **GPU/CPU performance benchmarking** using `pytest` and `pytest-benchmark`.  
+This framework implements **GPU/CPU performance benchmarking** using `PyTorch`, `Pytest` & `Pytest-benchmark` and leveraging CI/CD and Docker.
 It automatically detects available accelerators, measures inference throughput, GPU/CPU utilization, and memory usage, and produces **interactive Allure reports** for analysis.
+
 
 | **Component** | **Technology** | **Role** |
 |---------------|----------------|----------|

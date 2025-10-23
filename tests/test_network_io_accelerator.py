@@ -206,12 +206,18 @@ class TestNetworkIOAccelerator:
         """Run repeated ping over 30 seconds and track packet loss."""
         host = "8.8.8.8"
         try:
-            result = subprocess.run(["ping", host, "-n", "10"], capture_output=True, text=True)
+            # Increased ping count for a better stability sample
+            result = subprocess.run(["ping", host, "-n", "30"], capture_output=True, text=True) 
             loss_match = re.search(r"(\d+)% loss", result.stdout)
             packet_loss = int(loss_match.group(1)) if loss_match else 100
         except Exception:
             packet_loss = 100
+            
+        # Attach the final metric for Allure trending (TEXT format)
+        allure.attach(f"{packet_loss}", name="Packet Loss Percentage", attachment_type=allure.attachment_type.TEXT) # ⬅️ ADDED
 
-        allure.attach(result.stdout, name="Ping Output", attachment_type=allure.attachment_type.TEXT)
-        assert packet_loss < 5, f"High packet loss: {packet_loss}%"
-        benchmark(lambda: packet_loss)
+        # Attach raw data for debug
+        allure.attach(result.stdout, "Ping Output", allure.attachment_type.TEXT)
+        
+        # Validation
+        assert packet_loss == 0, f"Detected packet loss: {packet_loss}%"

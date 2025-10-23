@@ -4,7 +4,8 @@ import time
 import psutil
 import numpy as np
 import allure
-
+import json # <-- ADDED
+from supports.gpu_monitor import collect_gpu_metrics # <-- ADDED
 from scripts.plot_gpu_metrics import attach_chart_to_allure
 
 
@@ -156,7 +157,7 @@ def test_cupy_vectorized_ops():
     allure.attach(f"CuPy vectorized ops took {elapsed:.4f}s", name="CuPy Vector Ops", attachment_type=allure.attachment_type.TEXT)
     assert elapsed < 1.0
 
-
+'''
 # --------------------------------------------------------------------
 # 6. TensorFlow Multi-GPU Training Simulation
 # --------------------------------------------------------------------
@@ -192,3 +193,64 @@ def test_tensorflow_multi_gpu_train():
 
     allure.attach(f"TensorFlow multi-GPU training took {elapsed:.4f}s", name="TF Multi-GPU", attachment_type=allure.attachment_type.TEXT)
     assert elapsed < 10
+'''
+
+# --------------------------------------------------------------------
+# 6. TensorFlow Multi-GPU Training Simulation
+# --------------------------------------------------------------------
+@allure.feature("TensorFlow Distributed")
+@allure.story("Multi-GPU Training Simulation")
+@pytest.mark.gpu
+@pytest.mark.accelerator
+@pytest.mark.benchmark
+def test_tensorflow_multi_gpu_train():
+    try:
+        import tensorflow as tf
+        from tensorflow.keras.models import Sequential
+        from tensorflow.keras.layers import Dense
+    except ImportError:
+        pytest.skip("TensorFlow not installed")
+
+    gpus = tf.config.list_physical_devices('GPU')
+    if len(gpus) < 2:
+        pytest.skip("Need at least 2 GPUs for distributed test")
+
+    strategy = tf.distribute.MirroredStrategy()
+    with strategy.scope():
+        model = tf.keras.Sequential([
+            tf.keras.layers.Dense(1024, activation='relu'),
+            tf.keras.layers.Dense(10, activation='softmax')
+        ])
+        
+        model.compile(optimizer='adam', loss='sparse_categorical_crossentropy')
+
+        x = np.random.rand(1000, 1024).astype(np.float32) # 1000 total samples
+        y = np.random.randint(0, 10, 1000)
+        total_samples = x.shape[0]
+
+        # --- 1. Collect Telemetry and Run Training ---
+        telemetry_start = collect_gpu_metrics(duration=1, interval=0.5) 
+        
+        start_time = time.time()
+        # Train for one epoch
+        model.fit(x, y, epochs=1, batch_size=64 * len(gpus), verbose=0)
+        duration = time.time() - start_time
+        
+        telemetry_end = collect_gpu_metrics(duration=1, interval=0.5) 
+        
+        # --- 2. Calculate Throughput (Samples/sec) ---
+        samples_per_sec = total_samples / duration
+        
+        # --- 3. Attach Metrics to Allure ---
+        with allure.step("Performance Metrics"):
+            allure.attach(f"{samples_per_sec:.2f}", 
+                          name="Training Samples/sec", 
+                          attachment_type=allure.attachment_type.TEXT)
+            allure.attach(
+                json.dumps({"telemetry_start": telemetry_start, "telemetry_end": telemetry_end}),
+                name="GPU Utilization Snapshots (JSON)",
+                attachment_type=allure.attachment_type.JSON,
+            )
+
+        allure.attach(f"{duration:.3f}s for 1 epoch", name="Training Duration")
+        assert duration < 10.0, f"Training took too long: {duration:.3f}s"

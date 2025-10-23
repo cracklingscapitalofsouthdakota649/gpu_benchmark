@@ -5,6 +5,7 @@ import time
 import allure
 import pytest
 import torch
+import numpy as np # <-- Added numpy import for robust averaging
 
 from scripts.plot_gpu_metrics import attach_chart_to_allure
 from scripts.system_metrics import SystemMetrics
@@ -12,8 +13,8 @@ from tests.device_utils import pick_device, get_device, synchronize
 
 RESULTS_DIR = "allure-results"
 
-@allure.feature("GPU Deep Learning Workloads")  # ⬅️ ADDED
-@allure.story("Model Inference Steady-State")  # ⬅️ ADDED
+@allure.feature("GPU Deep Learning Workloads")
+@allure.story("Model Inference Steady-State")
 @pytest.mark.gpu
 @pytest.mark.cpu
 @pytest.mark.benchmark
@@ -39,7 +40,10 @@ def test_inference_load(batch_size, benchmark):
         result = DummyResult()
 
     fps = round(1 / result.mean, 2) if result.mean > 0 else 0.0
-
+    
+    # Attach FPS as a single result for Allure trending (TEXT format)
+    allure.attach(f"{fps}", name="Inference FPS", attachment_type=allure.attachment_type.TEXT) # ⬅️ ADDED
+    
     # Collect metrics for visualization
     run_metrics = []
     num_metric_steps = 30
@@ -52,12 +56,13 @@ def test_inference_load(batch_size, benchmark):
         time.sleep(0.05)
 
     # Attach charts safely
+    allure.attach(json.dumps(run_metrics, indent=2), "Resource Metrics", allure.attachment_type.JSON)
     attach_chart_to_allure(run_metrics)
 
     # Compute averages
-    avg_gpu = sum(m.get("gpu_util", 0) for m in run_metrics) / len(run_metrics)
-    avg_cpu = sum(m.get("cpu_util", 0) for m in run_metrics) / len(run_metrics)
-    avg_mem = sum(m.get("gpu_mem_util", 0) for m in run_metrics) / len(run_metrics)
+    avg_gpu = np.mean([m.get("gpu_util", 0) for m in run_metrics])
+    avg_cpu = np.mean([m.get("cpu_util", 0) for m in run_metrics])
+    avg_mem = np.mean([m.get("gpu_mem_util", 0) for m in run_metrics])
 
     # Summary
     summary = {
@@ -66,14 +71,15 @@ def test_inference_load(batch_size, benchmark):
         "avg_util": round(avg_gpu, 2),
         "avg_mem": round(avg_mem, 2),
         "avg_cpu_util": round(avg_cpu, 2),
-        "fps": fps,
+        "fps": fps, # Include the calculated FPS
         "backend": dev_type,
     }
 
     # Save results
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    summary_file = os.path.join(RESULTS_DIR, f"summary_inference_load_{batch_size}.json")
-    with open(summary_file, "w") as f:
+    out_path = os.path.join(RESULTS_DIR, f"{summary['test_name']}.json")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
-
-    allure.attach(json.dumps(summary, indent=2), "Performance Summary", allure.attachment_type.JSON)
+        
+    # Final Metric Attachment for Allure Trending
+    allure.attach(f"{fps}", name="Frames Per Second (FPS)", attachment_type=allure.attachment_type.TEXT)

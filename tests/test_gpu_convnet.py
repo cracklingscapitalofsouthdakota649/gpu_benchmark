@@ -26,4 +26,5 @@ def test_convnet_forward_pass(benchmark):
             _ = model(data)
             torch.cuda.synchronize() if torch.cuda.is_available() else None
 
+    # FAILED LINE ⬇️ (Implicitly returns None, which external tooling tries to access)
     benchmark(forward)

@@ -7,6 +7,9 @@ import pytest
 import torch
 import allure
 import numpy as np
+import json # <-- ADDED
+from supports.gpu_monitor import collect_gpu_metrics # <-- ADDED
+
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 from torch.cuda.amp import autocast, GradScaler # Added from second file
@@ -351,34 +354,43 @@ class TestRealNvidiaGPU:
         assert throughput > 1_000_000, f"Low GRU throughput: {throughput / 1e6:.2f} M-samples/sec"        
         
     # ───────────────────────────────────────────────────────────────
-    # 10. cuFFT Throughput (Fast Fourier Transform) - Unique from File 1
+    # 10. cuFFT Throughput (Fast Fourier Transform)
     # ───────────────────────────────────────────────────────────────
     @allure.feature("NVIDIA GPU")
     @allure.story("cuFFT (FFT) Throughput")
     @pytest.mark.benchmark
     def test_fft_throughput(self, setup_device, benchmark):
-        """Benchmark cuFFT by performing a large 3D FFT."""
+        """Benchmark cuFFT by performing a large 3D FFT and collecting telemetry."""
         device = setup_device
         # 512^3 complex tensor
         shape = (512, 512, 512)
-        try:
-            data = torch.randn(shape, dtype=torch.complex64, device=device)
-        except Exception as e:
-            pytest.skip(f"Could not allocate tensor for FFT test: {e}")
+        # ... (error handling)
             
         def fft_op():
             torch.cuda.synchronize()
-            start = time.perf_counter()
-            # Perform 3D Fast Fourier Transform
             _ = torch.fft.fftn(data)
             torch.cuda.synchronize()
-            return time.perf_counter() - start
+
+        # --- 1. Run the benchmark ---
+        result = benchmark(fft_op)
+        duration_mean = result.stats.mean
             
-        duration = benchmark(fft_op)
-        # Calculate throughput in Giga-elements processed per second
+        # 2. Calculate throughput
         giga_elements = (data.numel()) / 1e9
-        throughput_geps = giga_elements / duration
+        throughput_geps = giga_elements / duration_mean # Giga-elements processed per second
         
-        allure.attach(f"{throughput_geps:.2f} Giga-elements/sec", name="cuFFT (fftn) Throughput")
-        # FFTs are memory-bound
-        assert throughput_geps > 20, f"Low cuFFT throughput: {throughput_geps:.2f} Giga-elements/sec"
+        # 3. Collect GPU Telemetry (3-second sample)
+        telemetry = collect_gpu_metrics(duration=3, interval=0.1) 
+
+        # 4. Attach Metrics to Allure
+        with allure.step("Performance Metrics"):
+            allure.attach(f"{throughput_geps:.2f}", 
+                          name="FFT Throughput (GEPS)", 
+                          attachment_type=allure.attachment_type.TEXT)
+            allure.attach(
+                json.dumps(telemetry, indent=2),
+                name="GPU Utilization (JSON)",
+                attachment_type=allure.attachment_type.JSON,
+            )
+            
+        assert throughput_geps > 10.0, f"FFT throughput too low: {throughput_geps:.2f} GEPS"

@@ -8,6 +8,8 @@ import torch
 import allure
 import numpy as np
 from torch import nn
+import json # <-- ADDED
+from supports.gpu_monitor import collect_gpu_metrics # <-- ADDED
 
 def detect_amd_gpu():
     """Return True if an AMD GPU with ROCm/HIP support is available."""
@@ -221,21 +223,30 @@ class TestAmdGPUAccelerator:
         model = nn.Sequential(
             nn.Conv2d(3, 64, 3, stride=1, padding=1),
             nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1,1)),
+            nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
             nn.Linear(64, 100)
         ).to(device)
         model.eval()
         batch = torch.randn((128, 3, 224, 224), device=device)
+        batch_size = batch.shape[0]
 
         def inference_op():
-            torch.cuda.synchronize()
-            start = time.perf_counter()
             _ = model(batch)
             torch.cuda.synchronize()
-            return time.perf_counter() - start
 
-        duration = benchmark(inference_op)
-        samples_per_sec = 128 / duration
-        allure.attach(f"{samples_per_sec:.2f} samples/sec", name="End-to-End Throughput")
-        assert samples_per_sec > 250, f"Inference throughput too low: {samples_per_sec:.2f} samples/sec"
+        result = benchmark(inference_op)
+        duration_mean = result.stats.mean
+        fps = batch_size / duration_mean
+
+        telemetry = collect_gpu_metrics(duration=3, interval=0.1)
+
+        with allure.step("Performance Metrics"):
+            allure.attach(f"{fps:.2f}",
+                          name="Frames Per Second (FPS)",
+                          attachment_type=allure.attachment_type.TEXT)
+            allure.attach(json.dumps(telemetry, indent=2),
+                          name="GPU Utilization (JSON)",
+                          attachment_type=allure.attachment_type.JSON)
+
+        assert fps > 100.0, f"Inference throughput too low: {fps:.2f} FPS"

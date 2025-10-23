@@ -9,6 +9,9 @@ import pytest
 import os
 import torch
 
+# Register the telemetry hook as a pytest plugin
+pytest_plugins = ["supports.telemetry_hook"]
+
 # ───────────────────────────────────────────────────────────────
 # Global Test Setup / Teardown
 # ───────────────────────────────────────────────────────────────

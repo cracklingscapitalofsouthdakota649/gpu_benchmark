@@ -17,5 +17,7 @@ def test_matrix_multiplication(benchmark):
         torch.cuda.synchronize() if torch.cuda.is_available() else None
         return c
 
+    # FAILED LINE ⬇️ (Returns a Tensor)
     result = benchmark(multiply)
+    # FAILED LINE ⬆️ (External tooling likely tries to access result.stats)
     assert result is not None
