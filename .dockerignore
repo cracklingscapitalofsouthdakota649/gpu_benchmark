@@ -11,17 +11,16 @@ __pycache__/
 .bat
 .env/
 .venv/
-.git/
 env/
 venv/
-venv310/
 .tox/
+.git/
 .benchmarks/
+tmp/
 
 
 Ignore test results and reports
 allure-results/
-allure-report/
 reports/
 *.log
 *.json
@@ -29,7 +28,7 @@ reports/
 Ignore build artifacts and junk files
 build/
 dist/
-tmp/
+allure-html-report/
 *.tmp
 Thumbs.db
 .DS_Store
@@ -37,3 +36,16 @@ Thumbs.db
 Ignore the Dockerfile and other Docker-related files themselves
 Dockerfile
 .dockerignore
+last_pushed_id.txt
+BUILD_NUMBER.txt
+Thumbs.db
+.DS_Store
+*.tmp
+*.swp
+g.bat
+build.bat
+ci.bat
+last_pushed_id.txt
+BUILD_NUMBER.txt
+debug_job.bat
+index.html

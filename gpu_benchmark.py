@@ -1,3 +1,4 @@
+# gpu_benchmark.py
 #!/usr/bin/env python3
 """
 gpu_benchmark.py — Unified benchmark runner with Allure telemetry trend support.
@@ -25,6 +26,8 @@ ALLURE_REPORT = "allure-report"
 SUPPORT_DIR = "supports"
 TARGET_PYTHON_VERSION = "3.10"
 
+# FIX 1: Windows Process Group Creation Flag for robust Ctrl+C handling
+CREATE_NEW_PROCESS_GROUP = 0x00000200 if platform.system() == "Windows" else 0
 
 # --------------------------
 # Python Version Management
@@ -35,7 +38,9 @@ def find_python_executable(version=TARGET_PYTHON_VERSION):
         if sys.platform.startswith("win"):
             result = subprocess.run(
                 ["py", f"-{version}", "-c", "import sys;print(sys.executable)"],
-                capture_output=True, text=True, check=True, timeout=5
+                capture_output=True, text=True, check=True, timeout=5,
+                # FIX 1: Apply process group flag
+                creationflags=CREATE_NEW_PROCESS_GROUP
             )
             path = result.stdout.strip()
             if path and os.path.exists(path):
@@ -62,31 +67,64 @@ def ensure_python310():
         print(f"[INFO] Switching to Python {TARGET_PYTHON_VERSION}: {py_path}")
 
         if sys.platform.startswith("win"):
-            # Build quoted argument list safely
             args_str = " ".join([f'"{a}"' for a in sys.argv])
             ps_cmd = f'& "{py_path}" {args_str}'
 
-            # Run invisibly but wait until completion
+            # Run and wait until completion
             subprocess.run(
-                ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_cmd],
+                # FIX 2: Removed "-WindowStyle", "Hidden" to prevent minimizing
+                ["powershell", "-NoProfile", "-Command", ps_cmd],
                 check=False,
+                # FIX 1: Apply process group flag
+                creationflags=CREATE_NEW_PROCESS_GROUP
             )
             sys.exit(0)
         else:
             os.execve(py_path, [py_path] + sys.argv, os.environ)
 
 # --------------------------
-# Hardware Info
+# Hardware Info & Helper Command Runner
 # --------------------------
+def run_cmd(cmd, check=True, suppress_output=False):
+    """
+    Run a command on host.
+    If suppress_output is True, stdout/stderr are not printed to the console.
+    """
+    try:
+        proc = subprocess.run(
+            cmd, check=check, text=True, capture_output=True,
+            # FIX 1: Apply process group flag
+            creationflags=CREATE_NEW_PROCESS_GROUP
+        )
+        if not suppress_output:
+            if proc.stdout:
+                print(proc.stdout)
+            if proc.stderr:
+                print(proc.stderr)
+        return proc.returncode, proc.stdout, proc.stderr
+    except subprocess.CalledProcessError as e:
+        if not suppress_output:
+            print(f"[ERROR] Command failed: {' '.join(cmd)}")
+            if e.stdout:
+                print(e.stdout)
+            if e.stderr:
+                print(e.stderr)
+        if check:
+            raise
+        return e.returncode, e.stdout, e.stderr
+        
 def detect_cpu_info():
     try:
         if sys.platform.startswith("win"):
-            cpu = platform.processor()
-            if not cpu:
-                cpu = subprocess.check_output(
-                    ["wmic", "cpu", "get", "name"], text=True
-                ).split("\n")[1].strip()
-            return cpu
+            # Use 'wmic' via run_cmd and SUPPRESS THE OUTPUT to avoid the whitespace gap.
+            _, stdout, _ = run_cmd(["wmic", "cpu", "get", "name", "/value"], check=False, suppress_output=True)
+            if stdout:
+                # Iterate through lines to find 'Name=' and strip whitespace aggressively.
+                output_lines = stdout.splitlines()
+                for line in output_lines:
+                    if line.startswith("Name="):
+                        return line.split('=')[-1].strip()
+                return "Unknown CPU (WMIC failure)"
         elif sys.platform.startswith("linux"):
             with open("/proc/cpuinfo") as f:
                 for line in f:
@@ -96,20 +134,20 @@ def detect_cpu_info():
     except Exception:
         return "Unknown CPU"
 
-
 def detect_memory_info():
     try:
         return round(psutil.virtual_memory().total / (1024 ** 3), 2)
     except Exception:
         return 0
 
-
 def detect_gpu_info():
     vendor, name = "None", "None"
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=2
+            capture_output=True, text=True, timeout=2,
+            # FIX 1: Apply process group flag
+            creationflags=CREATE_NEW_PROCESS_GROUP
         )
         if result.returncode == 0 and result.stdout.strip():
             return "NVIDIA", result.stdout.strip().split("\n")[0]
@@ -208,12 +246,21 @@ def run_pytest(build_number, suite):
     print(f"[INFO] Running pytest suite: {suite.upper()}")
 
     # Graceful SIGINT handling
-    process = subprocess.Popen(pytest_cmd)
+    # FIX 1: Apply process group flag to Popen
+    process = subprocess.Popen(pytest_cmd, creationflags=CREATE_NEW_PROCESS_GROUP)
     try:
         process.wait()
     except KeyboardInterrupt:
         print("\n[WARN] Ctrl+C detected — terminating benchmark...")
-        process.send_signal(signal.SIGINT)
+        if platform.system() == "Windows":
+             # Terminate the process group reliably on Windows
+             subprocess.call(
+                 ['taskkill', '/F', '/T', '/PID', str(process.pid)],
+                 creationflags=CREATE_NEW_PROCESS_GROUP
+             )
+        else:
+            # Standard Linux/Unix signal handling
+            process.send_signal(signal.SIGINT) 
         process.wait()
     return process.returncode
 
@@ -227,61 +274,74 @@ def generate_allure_report(build_number):
     if not allure_bin:
         print("[WARN] Allure CLI not found. Install it via Scoop or npm.")
         return
-    subprocess.run([allure_bin, "generate", results_dir, "-o", ALLURE_REPORT, "--clean"])
+    # FIX 1: Apply process group flag to subprocess.run
+    subprocess.run(
+        [allure_bin, "generate", results_dir, "-o", ALLURE_REPORT, "--clean"],
+        creationflags=CREATE_NEW_PROCESS_GROUP
+    )
     print(f"[INFO] Report generated to {ALLURE_REPORT}")
 
 
 def open_allure_report():
     allure_bin = shutil.which("allure") or shutil.which("allure.cmd")
     if allure_bin:
-        subprocess.Popen([allure_bin, "open", ALLURE_REPORT])
+        # FIX 1: Apply process group flag to Popen
+        subprocess.Popen([allure_bin, "open", ALLURE_REPORT], creationflags=CREATE_NEW_PROCESS_GROUP)
 
 
 # --------------------------
 # Main Entrypoint
 # --------------------------
 def main():
-    ensure_python310()
-    if len(sys.argv) < 2:
-        print("Usage: python gpu_benchmark.py <Build_Number> [suite]")
+    try:
+        ensure_python310()
+        if len(sys.argv) < 2:
+            print("Usage: python gpu_benchmark.py <Build_Number> [suite]")
+            sys.exit(1)
+
+        build_number = sys.argv[1]
+        suite = sys.argv[2] if len(sys.argv) > 2 else "gpu"
+
+        print("=" * 80)
+        print(f" Starting GPU Benchmark Suite | Build #{build_number} | Suite: {suite.upper()} ")
+        print("=" * 80)
+
+        results_dir = os.path.join(ALLURE_RESULTS, str(build_number))
+        os.makedirs(results_dir, exist_ok=True)
+
+        ensure_categories(results_dir)
+        copy_history(build_number)
+        update_executor_json(build_number)
+        write_environment_properties(build_number)
+
+        start = time.time()
+        rc = run_pytest(build_number, suite)
+        print(f"[INFO] Test execution completed in {round(time.time() - start, 2)}s (exit={rc}).")
+
+        generate_allure_report(build_number)
+
+        # --- Performance Trend ---
+        trend = update_performance_trend(
+            build_number,
+            results_dir=ALLURE_RESULTS,
+            history_dir=os.path.join(ALLURE_REPORT, "history")
+        )
+        if trend:
+            chart = plot_trend_chart(trend, os.path.join(ALLURE_RESULTS, str(build_number)), build_number)
+            if chart and os.path.exists(chart):
+                print(f"[INFO] Trend chart generated: {chart}")
+        else:
+            print("[WARN] No telemetry data found for trend (check supports/telemetry_hook).")
+
+        open_allure_report()
+        sys.exit(rc)
+    
+    except KeyboardInterrupt:
+        print("\n\nOperation cancelled by user (Ctrl+C). Exiting.")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\nAn unhandled error occurred: {e}")
         sys.exit(1)
-
-    build_number = sys.argv[1]
-    suite = sys.argv[2] if len(sys.argv) > 2 else "gpu"
-
-    print("=" * 80)
-    print(f" Starting GPU Benchmark Suite | Build #{build_number} | Suite: {suite.upper()} ")
-    print("=" * 80)
-
-    results_dir = os.path.join(ALLURE_RESULTS, str(build_number))
-    os.makedirs(results_dir, exist_ok=True)
-
-    ensure_categories(results_dir)
-    copy_history(build_number)
-    update_executor_json(build_number)
-    write_environment_properties(build_number)
-
-    start = time.time()
-    rc = run_pytest(build_number, suite)
-    print(f"[INFO] Test execution completed in {round(time.time() - start, 2)}s (exit={rc}).")
-
-    generate_allure_report(build_number)
-
-    # --- Performance Trend ---
-    trend = update_performance_trend(
-        build_number,
-        results_dir=ALLURE_RESULTS,
-        history_dir=os.path.join(ALLURE_REPORT, "history")
-    )
-    if trend:
-        chart = plot_trend_chart(trend, os.path.join(ALLURE_RESULTS, str(build_number)), build_number)
-        if chart and os.path.exists(chart):
-            print(f"[INFO] Trend chart generated: {chart}")
-    else:
-        print("[WARN] No telemetry data found for trend (check supports/telemetry_hook).")
-
-    open_allure_report()
-    sys.exit(rc)
 
 
 if __name__ == "__main__":

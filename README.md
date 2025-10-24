@@ -184,16 +184,11 @@ allure serve allure-results
 
 📸 *Preview of GPU Metrics Dashboard:*  
 
-![Allure Overview Report](docs/screenshots/allure_gpu_overview.png)  
+![GPU Utilization](images/gpu_cpu_utilization.png)
 *Shows FPS, GPU utilization, and memory usage over time.*
 
 ![Allure Pytest Suites Report](docs/screenshots/allure_gpu_suites.png)  
 *Detailed view per test with step-by-step metrics.*
-
-📸 *CPU Metrics Preview:*  
-
-![Allure CPU Overview](docs/screenshots/allure_cpu_overview.png)  
-*Tracks CPU utilization, memory usage, and benchmark throughput.*
 
 > Opens an interactive HTML dashboard with detailed execution insights.
 
