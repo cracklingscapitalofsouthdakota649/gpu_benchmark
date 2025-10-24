@@ -1,6 +1,9 @@
 Ignore the Python cache and environment directories
 pycache/
 __pycache__/
+scripts/__pycache__/
+tests/__pycache__/
+scripts/custom-trend/
 *.pyc
 *.pyo
 *.pyd
@@ -15,15 +18,19 @@ env/
 venv/
 .tox/
 .git/
+.gitignore
 .benchmarks/
 tmp/
 
 
 Ignore test results and reports
 allure-results/
+allure-report/
 reports/
+images/
 *.log
 *.json
+*.tmp
 
 Ignore build artifacts and junk files
 build/
@@ -45,6 +52,7 @@ Thumbs.db
 g.bat
 build.bat
 ci.bat
+run_gpu_benchmark.bat
 last_pushed_id.txt
 BUILD_NUMBER.txt
 debug_job.bat

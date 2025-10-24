@@ -41,6 +41,8 @@ def measure_bandwidth(bytes_transferred, seconds):
 @story("Matrix Multiplication Performance")
 @severity(severity_level.CRITICAL)
 @pytest.mark.io_accelerator
+@pytest.mark.gpu
+@pytest.mark.nvidia
 def test_tensorflow_matmul_benchmark(allure_attach):
     """Benchmark large matrix multiplication on GPU."""
     size = 4096
@@ -60,6 +62,8 @@ def test_tensorflow_matmul_benchmark(allure_attach):
 @story("Conv2D Operation Performance")
 @severity(severity_level.NORMAL)
 @pytest.mark.io_accelerator
+@pytest.mark.gpu
+@pytest.mark.nvidia
 def test_tensorflow_conv2d_benchmark(allure_attach):
     """Benchmark Conv2D operation on GPU."""
     input_shape = (32, 128, 128, 3)
@@ -82,6 +86,8 @@ def test_tensorflow_conv2d_benchmark(allure_attach):
 @story("Mixed Precision Inference Speed")
 @severity(severity_level.NORMAL)
 @pytest.mark.io_accelerator
+@pytest.mark.gpu
+@pytest.mark.nvidia
 def test_tensorflow_mixed_precision_inference(allure_attach):
     """Benchmark mixed precision inference."""
     tf.keras.mixed_precision.set_global_policy('mixed_float16')
@@ -101,6 +107,8 @@ def test_tensorflow_mixed_precision_inference(allure_attach):
 @story("Random Number Generation Performance")
 @severity(severity_level.MINOR)
 @pytest.mark.io_accelerator
+@pytest.mark.gpu
+@pytest.mark.nvidia
 def test_tensorflow_random_generation(allure_attach):
     """Benchmark random number generation."""
     start = time.perf_counter()
@@ -116,6 +124,8 @@ def test_tensorflow_random_generation(allure_attach):
 @story("GPU Memory Throughput (GB/s)")
 @severity(severity_level.CRITICAL)
 @pytest.mark.io_accelerator
+@pytest.mark.gpu
+@pytest.mark.nvidia
 def test_tensorflow_memory_bandwidth(allure_attach):
     """Measure approximate GPU memory bandwidth."""
     size = 8192
@@ -137,6 +147,8 @@ def test_tensorflow_memory_bandwidth(allure_attach):
 @story("Multi-GPU Parallelism Performance")
 @severity(severity_level.BLOCKER)
 @pytest.mark.io_accelerator
+@pytest.mark.gpu
+@pytest.mark.nvidia
 def test_tensorflow_multi_gpu_parallelism(allure_attach):
     """Benchmark multi-GPU parallel computation."""
     gpus = tf.config.list_logical_devices('GPU')

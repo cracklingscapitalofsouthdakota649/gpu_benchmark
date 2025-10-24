@@ -19,12 +19,6 @@ and interactive dashboards to quickly identify bottlenecks and optimize model ex
 
 ---
 
-## 👤 Author & Contact  
-**Author:** Bang Thien Nguyen  
-**Contact:** ontario1998@gmail.com  
-
----
-
 ## 💡 Project Overview  
 This framework implements **GPU/CPU performance benchmarking** using `PyTorch`, `Pytest` & `Pytest-benchmark` and leveraging CI/CD and Docker.
 It automatically detects available accelerators, measures inference throughput, GPU/CPU utilization, and memory usage, and produces **interactive Allure reports** for analysis.
@@ -171,7 +165,7 @@ gpu_benchmark/
 |-----------|-------------|
 | Run All GPU Tests | `pytest -m gpu --alluredir=allure-results -v` |
 | Run All CPU Tests | `pytest -m cpu --alluredir=allure-results -v` |
-| Run Specific Benchmark | `pytest -m "benchmark and gpu"` |
+| Run Specific Benchmark | `pytest -m "benchmark or gpu"` |
 
 ---
 
