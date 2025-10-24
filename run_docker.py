@@ -12,7 +12,7 @@ import signal
 
 # --- Configuration ---
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-IMAGE_NAME = "gpu-benchmark:latest"
+IMAGE_NAME = "luckyjoy/gpu-benchmark:latest"
 
 # Results & reports
 ALLURE_RESULTS_DIR = os.path.join(PROJECT_ROOT, "allure-results")

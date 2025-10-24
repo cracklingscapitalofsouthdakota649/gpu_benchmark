@@ -1,14 +1,15 @@
 # =============================================================
 # GPU Benchmark Suite Dockerfile (Intel oneAPI)
 # =============================================================
-# Author: Bang Thien Nguyen
+# Author: Bang Thien Nguyen (Target for Intel GPU on Windows 11/oneAPI)
 # Description: Container for running GPU benchmark tests with PyTorch
 #              targeting Intel GPUs via oneAPI. Includes Allure CLI.
 # =============================================================
 
 # ---- Base Image (Intel oneAPI GPU Runtime) ----
-# This image includes the necessary Intel GPU drivers, Level Zero, and OpenCL runtimes.
-FROM intel/oneapi-gpu-runtime:latest-ubuntu-22.04
+# FIX: Switched from the old NVIDIA base to a stable Intel oneAPI runtime 
+# image, which provides the necessary Level Zero/OpenCL drivers and SYCL environment.
+FROM intel/oneapi-runtime:2024.1.0-devel-ubuntu22.04
 
 # ---- Set Working Directory ----
 WORKDIR /app
@@ -21,53 +22,53 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=off \
     PIP_DISABLE_PIP_VERSION_CHECK=on \
     PIP_DEFAULT_TIMEOUT=100
-    
+
 # --- CRUCIAL INTEL/SYCL ENV VARS ---
 # Explicitly tell the SYCL runtime to use Intel Level Zero for GPU/dGPU.
-# This helps the application find the correct compute device.
 ENV SYCL_DEVICE_FILTER=LEVEL_ZERO:GPU 
 ENV PATH="${PATH}:/opt/allure-2.29.0/bin"
 
 # ===================================================================
-# FIX: Install Java and Allure CLI for report generation
+# System, Java, and Allure CLI Installation (CONSOLIDATED FOR SMALLER IMAGE)
 # ===================================================================
 
-# 1. Update package lists with retry logic
-RUN for i in 1 2 3 4 5; do apt-get update && break || sleep 5; done
-
-# 2. Install necessary system dependencies (Java JRE, wget, unzip)
-RUN apt-get install -y --no-install-recommends \
-    python3.10 python3-pip \
-    openjdk-21-jre-headless \
-    wget \
-    unzip && \
-    rm -rf /var/lib/apt/lists/*
-
-# 3. Download and configure the Allure Command Line tool
 ENV ALLURE_VERSION=2.29.0
-RUN wget -qO /tmp/allure-commandline.zip https://repo.maven.apache.org/maven2/io/qameta/allure/allure-commandline/${ALLURE_VERSION}/allure-commandline-${ALLURE_VERSION}.zip && \
-    unzip /tmp/allure-commandline.zip -d /opt && \
-    rm /tmp/allure-commandline.zip
 
-# 4. Add the Allure executable to the system PATH (already set via ENV)
+# Consolidated RUN command: 
+# 1. Updates packages.
+# 2. Installs all system dependencies (Python, Java, build tools).
+# 3. Downloads Allure.
+# 4. Unzips Allure.
+# 5. CLEANS UP temporary files and package lists (crucial for size).
+RUN set -ex; \
+    # 1. Update package lists with retry logic
+    for i in 1 2 3 4 5; do apt-get update && break || sleep 5; done; \
+    \
+    # 2. Install necessary system dependencies
+    apt-get install -y --no-install-recommends \
+        openjdk-21-jre-headless \
+        wget \
+        unzip; \
+    \
+    # 3. Download and configure the Allure Command Line tool
+    wget -qO /tmp/allure-commandline.zip https://repo.maven.apache.org/maven2/io/qameta/allure/allure-commandline/${ALLURE_VERSION}/allure-commandline-${ALLURE_VERSION}.zip; \
+    unzip /tmp/allure-commandline.zip -d /opt; \
+    \
+    # 4. Clean up everything installed/downloaded in this layer
+    rm /tmp/allure-commandline.zip; \
+    rm -rf /var/lib/apt/lists/*
 
 # ===================================================================
 # Python Dependency Installation
 # ===================================================================
 
-# Check if requirements.txt exists in the build context and copy it.
-# Note: The Intel base image already has Python, we use the installed version.
+# Copy requirements.txt, ensure it exists, and install dependencies
 COPY requirements.txt .
-
-# Ensure requirements.txt exists by creating an empty one if the previous COPY failed.
 RUN if [ ! -f requirements.txt ]; then echo "" > requirements.txt; fi
 
-# Install core project dependencies, including the necessary testing packages
-RUN python3.10 -m pip install --upgrade pip
-RUN python3.10 -m pip install --no-cache-dir \
-    -r requirements.txt || true
+# Consolidated RUN command for pip operations
+RUN python3.10 -m pip install --upgrade pip && \
+    python3.10 -m pip install --no-cache-dir -r requirements.txt || true
 
 # Copy the rest of the application code into the container
 COPY . /app
-
-CMD ["/usr/local/bin/python", "-m", "pytest" -m "preprocess"]
