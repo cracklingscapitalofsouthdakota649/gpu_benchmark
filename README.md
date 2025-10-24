@@ -178,7 +178,7 @@ pytest -m gpu --alluredir=allure-results
 allure serve allure-results
 
 ```
-📸 *Preview:* 
+📸 *Allure Report Preview:* 
 
 ![Allure Overview Report](images/allure_report.jpg)
 
