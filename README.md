@@ -180,15 +180,11 @@ allure serve allure-results
 ```
 📸 *Preview:* 
 
-![Allure Overview Report](https://github.com/luckyjoy/gpu_benchmark/blob/main/reports/allure_report.jpg)
+![Allure Overview Report](images/allure_report.jpg)
 
-📸 *Preview of GPU Metrics Dashboard:*  
 
 ![GPU Utilization](images/gpu_cpu_utilization.png)
-*Shows FPS, GPU utilization, and memory usage over time.*
 
-![Allure Pytest Suites Report](docs/screenshots/allure_gpu_suites.png)  
-*Detailed view per test with step-by-step metrics.*
 
 > Opens an interactive HTML dashboard with detailed execution insights.
 
