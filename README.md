@@ -2,9 +2,20 @@
 
 **A Universal Benchmarking Framework for PyTorch Performance.**
 
-Evaluate and compare GPU and CPU performance with unparalleled accuracy using PyTorch, pytest, and detailed Allure reporting. This robust framework offers 
+Evaluate and compare GPU and CPU performance with unparalleled accuracy using PyTorch-2.9, Tensorflow-2.20, pytest, and detailed Allure reporting. This robust framework offers 
 out-of-the-box support for heterogeneous hardware, including NVIDIA, AMD, Intel, DirectML, and standard CPU-only execution. Generate clear performance metrics 
 and interactive dashboards to quickly identify bottlenecks and optimize model execution across any accelerator.
+
+---
+
+![PyTorch](https://img.shields.io/badge/PyTorch-2.9%2B-red.svg?style=for-the-badge&logo=PyTorch-2)
+![TensorFlow](https://img.shields.io/badge/TensorFlow-2.20%2B-yellow.svg?style=for-the-badge&logo=TensorFlow-2)
+![Pytest](https://img.shields.io/badge/pytest-8.4%2B-green.svg?style=for-the-badge&logo=pytest)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=for-the-badge&logo=python3)
+![Kubernetes](https://img.shields.io/badge/kubernetes-ready-yellow?style=for-the-badge&logo=kubernetes)
+![Docker](https://img.shields.io/badge/docker-ready-blue?style=for-the-badge&logo=docker)
+![CI/CD](https://img.shields.io/badge/CI/CD-ready-green?style=for-the-badge&logo=cicd)
+![Allure Report](https://img.shields.io/badge/report-Allure-orange?style=for-the-badge&logo=allure)
 
 ---
 
