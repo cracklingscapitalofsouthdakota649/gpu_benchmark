@@ -125,6 +125,7 @@ gpu_benchmark/
 ├─ Dockerfile                          # Main Docker build file
 ├─ Dockerfile.mini                     # Minimal Docker build file
 ├─ Dockerfile.report                   # Docker build file for the report server
+├─ Jenkinsfile						   # Option for Jenkins CI pipelines
 ├─ README.md
 ├─ requirements.txt
 ├─ pytest.ini                          # Pytest configuration
