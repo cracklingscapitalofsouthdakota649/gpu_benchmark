@@ -195,20 +195,20 @@ gpu_benchmark/
 
 ---
 
-## 🏷️ Test Tags & Execution
+## 🏷️ Test Tags & Execution  
 
 The framework uses **Pytest Markers (`-m`)** to categorize and select specific test suites for execution.
 
 | Tag | Focus Area | Description |
 | :--- | :--- | :--- |
 | **`gpu`** | **Core Benchmark** | Tests running on any available accelerator (CUDA/ROCm/DirectML/Intel GPU). |
-| **`cpu`** | **Fallback/Reference** | Tests running on CPU only (used for baseline comparison). |
-| **`nvidia`** | NVIDIA-Specific | Tests targeting NVIDIA CUDA features (e.g., Tensor Cores, cuDNN). |
+| **`cpu`** | **Fallback/Reference** | Tests running on CPU fallback. |
+| **`nvidia`** | NVIDIA-Specific | Tests targeting NVIDIA CUDA features (e.g., CUDA, Tensor Cores). |
 | **`amd`** | AMD-Specific | Tests targeting AMD ROCm features. |
 | **`intel`** | Intel-Specific | Tests targeting Intel oneAPI/i915 features. |
 | **`directml`** | DirectML-Specific | Tests targeting DirectML features (Windows/WSL). |
 | **`benchmark`** | Performance Metric | Measures FPS, utilization, memory, and throughput. |
-| **`stress`** | Endurance/Load | Heavy-load GPU memory or compute stress tests. |
+| **`stress`** | Endurance/Load | Heavy-load GPU endurance tests. |
 
 ---
 
@@ -222,7 +222,6 @@ Use the commands below to execute specific test suites and generate Allure data 
 | **Run All CPU Benchmarks** | `pytest -m cpu --alluredir=allure-results -v` |
 | **Run Specific Tag (e.g., Performance + GPU)** | `pytest -m "benchmark and gpu" --alluredir=allure-results` |
 | **Run GPU/CPU Combined** | `pytest -m "benchmark or gpu or cpu"` |
-
 ---
 
 ## 📊 Professional Test Reporting  
