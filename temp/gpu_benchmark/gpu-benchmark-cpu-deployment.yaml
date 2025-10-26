@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-benchmark-cpu-deployment
+  labels:
+    app: gpu-benchmark
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gpu-benchmark
+  template:
+    metadata:
+      labels:
+        app: gpu-benchmark
+    spec:
+      containers:
+      - name: benchmark
+        # Updated with the correct image name provided by the user.
+        image: luckyjoy/gpu-benchmark-local 
+        ports:
+        - containerPort: 8888
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+            # REMOVED: gpu.intel.com/i915: 1 resource request
