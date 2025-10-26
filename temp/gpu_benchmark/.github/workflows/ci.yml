@@ -1,0 +1,395 @@
+name: GPU Benchmarks CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  # Required for dawidd6/action-download-artifact to fetch history
+  actions: read 
+  checks: read 
+
+env:
+  # Use a stable version and stick to it for consistency
+  ALLURE_VERSION: 2.29.0
+  SITE_DIR: site
+
+jobs:
+  test:
+    name: Run tests on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    outputs:
+      run_outcome: ${{ steps.run_tests.outputs.run_outcome }}
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests and collect Allure results
+        id: run_tests
+        timeout-minutes: 15
+        shell: bash
+        run: |
+            set +e
+            
+            # Use environment variable for OS Name
+            OS_NAME="${{ matrix.os }}"
+            RESULTS_DIR="allure-results/$OS_NAME"
+            mkdir -p "$RESULTS_DIR"
+            
+            # --- START: Environment Detection & Properties Generation ---
+            
+            ENV_PROPS_FILE="$RESULTS_DIR/environment.properties"
+            echo "Runner OS=$OS_NAME" > "$ENV_PROPS_FILE"
+            
+            # 1. GPU Detection (Universal via Python script)
+            GPU_JSON=$(python supports/gpu_check.py || echo '{"summary": {"backend": null, "cuda": false, "opencl_gpu_devices": 0}}')
+            
+            GPU_BACKEND=$(python -c "import json; print(json.loads('''$GPU_JSON''')['summary'].get('backend'))")
+            CUDA_AVAIL=$(python -c "import json; print(json.loads('''$GPU_JSON''')['summary'].get('cuda'))")
+            OPENCL_COUNT=$(python -c "import json; print(json.loads('''$GPU_JSON''')['summary'].get('opencl_gpu_devices'))")
+            
+            if [ "$GPU_BACKEND" != "None" ]; then
+              echo "GPU Backend=$GPU_BACKEND" >> "$ENV_PROPS_FILE"
+            fi
+            echo "CUDA Available=$CUDA_AVAIL" >> "$ENV_PROPS_FILE"
+            echo "OpenCL GPU Count=$OPENCL_COUNT" >> "$ENV_PROPS_FILE"
+
+            # 2. CPU Detection (OS-specific logic)
+            if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
+              # Linux: Uses lscpu
+              CPU_MODEL=$(lscpu | grep 'Model name' | sed 's/.*: *//' | tr -d '\n')
+              CPU_CORES=$(lscpu | grep '^CPU(s):' | awk '{print $2}' | tr -d '\n')
+              echo "CPU Model=$CPU_MODEL" >> "$ENV_PROPS_FILE"
+              echo "CPU Cores=$CPU_CORES" >> "$ENV_PROPS_FILE"
+            else
+              # ✅ FIX: Windows: Use powershell.exe (replaces wmic)
+              CPU_MODEL=$(powershell.exe -Command "(Get-CimInstance -ClassName Win32_Processor).Name" | tr -d '\r\n')
+              CPU_CORES=$(powershell.exe -Command "(Get-CimInstance -ClassName Win32_Processor).NumberOfCores" | tr -d '\r\n')
+              echo "CPU Model=$CPU_MODEL" >> "$ENV_PROPS_FILE"
+              echo "CPU Cores=$CPU_CORES" >> "$ENV_PROPS_FILE"
+            fi
+            
+            echo "Generated environment properties:"
+            cat "$ENV_PROPS_FILE"
+            
+            # --- END: Environment Detection & Properties Generation ---
+
+            # Additional environment setup for Linux (if needed)
+            if [[ "$OS_NAME" == "ubuntu-latest" ]]; then
+              echo "🐧 Running tests on Ubuntu (Direct Runner)..."
+              export PYOPENCL_CTX="0"
+              export OMP_NUM_THREADS=1
+            else
+              echo "🦾 Running tests on Windows..."
+            fi
+            
+            # Run Pytest
+            pytest -v -m "gpu or cpu" --alluredir="$RESULTS_DIR" --import-mode=importlib
+            TEST_EXIT_CODE=$?
+            
+            # 1. Check if results directory exists and has files (most critical check)
+            if [ ! -d "$RESULTS_DIR" ] || [ -z "$(find "$RESULTS_DIR" -type f -name '*.json' 2>/dev/null)" ]; then
+              echo "❌ No Allure results found — setup or configuration failure."
+              echo "run_outcome=FAIL" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+            
+            # 2. Check pytest exit code for test failures
+            if [ "$TEST_EXIT_CODE" -ne 0 ]; then
+              echo "⚠️ Some tests failed (pytest exit code $TEST_EXIT_CODE)."
+              echo "run_outcome=UNSTABLE" >> "$GITHUB_OUTPUT"
+              exit 0
+            else
+              echo "✅ All tests passed successfully."
+              echo "run_outcome=PASS" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            
+      - name: Upload Allure Results Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-${{ matrix.os }}
+          path: allure-results/${{ matrix.os }}
+          retention-days: 1 
+
+  report:
+    name: Generate Allure Reports & Deploy
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download Allure CLI (Manual)
+        run: |
+          wget https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.tgz
+          tar -xzf allure-${{ env.ALLURE_VERSION }}.tgz
+          mv allure-${{ env.ALLURE_VERSION }} allure-commandline
+          echo "$(pwd)/allure-commandline/bin" >> $GITHUB_PATH
+          
+      - name: Download Allure Test Results
+        uses: actions/download-artifact@v4
+        with:
+          path: allure-results
+
+      - name: Download Previous Allure History Artifact
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          # FIX: Explicitly use the workflow file name
+          workflow: ci.yml 
+          branch: main
+          name: allure-history
+          path: ${{ env.SITE_DIR }}
+          if_no_artifact_found: ignore
+          
+      - name: Restore Allure History (Simplified)
+        run: |
+          if [ -d "${{ env.SITE_DIR }}/.git" ]; then
+             echo "📦 Removing .git directory from restored history to prevent conflicts."
+             rm -rf "${{ env.SITE_DIR }}/.git"
+          fi
+          
+      - name: Generate Allure Reports Per OS
+        shell: bash
+        run: |
+          SITE_DIR="${{ env.SITE_DIR }}"
+          BUILD_NUMBER=${{ github.run_number }}
+          mkdir -p "$SITE_DIR/latest"
+          
+          # Clean up the downloaded artifact folder structure.
+          for OS in ubuntu-latest windows-latest; do
+            DOWNLOADED_PATH="allure-results/allure-results-$OS"
+            TARGET_PATH="allure-results/$OS"
+            if [ -d "$DOWNLOADED_PATH" ]; then
+              mv "$DOWNLOADED_PATH" "$TARGET_PATH"
+            fi
+          done
+
+          for OS in ubuntu-latest windows-latest; do
+            RESULTS_DIR="allure-results/$OS"
+            REPORT_DIR_BUILD="$SITE_DIR/$BUILD_NUMBER/$OS"
+            REPORT_DIR_LATEST="$SITE_DIR/latest/$OS"
+            
+            if [ -d "$RESULTS_DIR" ]; then
+              mkdir -p "$REPORT_DIR_BUILD" "$REPORT_DIR_LATEST"
+              
+              # Optimization: Preserve history before running generation
+              if [ -d "$REPORT_DIR_LATEST/history" ]; then
+                mkdir -p "$RESULTS_DIR/history"
+                cp -r "$REPORT_DIR_LATEST/history/"* "$RESULTS_DIR/history/" || true
+              fi
+
+              # The environment.properties file is now generated in the test job
+              cp supports/categories.json "$RESULTS_DIR/categories.json" 2>/dev/null || true
+
+              # Generate executor.json
+              REPO_NAME="${GITHUB_REPOSITORY##*/}"
+              echo "{\"name\":\"$OS\",\"type\":\"GitHub Actions\",\"url\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\",\"reportUrl\":\"https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/latest/$OS/\",\"buildOrder\":\"${BUILD_NUMBER}\",\"buildName\":\"Build ${BUILD_NUMBER} ($OS)\",\"buildUrl\":\"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}" > "$RESULTS_DIR/executor.json"
+
+              # Allure Generation
+              allure generate "$RESULTS_DIR" -o "$REPORT_DIR_BUILD" --clean
+              
+              # Update latest report directory
+              cp -r "$REPORT_DIR_BUILD"/* "$REPORT_DIR_LATEST/" || true
+              
+              # Write build time info
+              date -u > "$REPORT_DIR_BUILD/build-info.txt"
+              date -u > "$REPORT_DIR_LATEST/build-info.txt"
+            else
+              echo "⚠️ Warning: Allure results for $OS not found. Skipping report generation for this OS."
+            fi
+          done
+
+      - name: Finalize Reports and Build Index Page
+        shell: bash
+        run: |
+          SITE_DIR="${{ env.SITE_DIR }}"
+          # Fix: Replace absolute paths with relative paths
+          find "$SITE_DIR" -type f \( -path "*/latest/*" -o -path "*/${{ github.run_number }}/*" \) -name 'index.html' | while read FILE_PATH; do
+            sed -i 's|src="/|src="./|g; s|href="/|href="./|g' "$FILE_PATH"
+          done
+          
+          # --- Rebuild index.html logic ---
+          CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
+          
+          echo "<html><head><title>Allure Reports History</title>
+          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+          <style>
+          body{font-family:sans-serif;margin:20px;}
+          ul{list-style:none;padding:0;}
+          li{margin:6px 0;}
+          a{text-decoration:none;color:#0366d6;}
+          a:hover{text-decoration:underline;}
+          #chart-container {
+            max-width: 600px;
+            max-height: 300px;
+            margin: 0;
+          }
+          </style></head><body>
+          <h1>🤖 GPU Benchmarks CI/CD Build History</h1>
+          <h2>🧩 Latest Allure Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
+          
+          # Latest Reports List
+          for OS in ubuntu-latest windows-latest; do
+            if [ -d "$SITE_DIR/latest/$OS" ]; then
+              TS_UTC=$(cat "$SITE_DIR/latest/$OS/build-info.txt" 2>/dev/null || echo "")
+              TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS_UTC")
+              echo "<li><strong><a href='latest/$OS/'>Latest Report ($OS)</a></strong> - Last run: $TS_DISPLAY</li>" >> "$SITE_DIR/index.html"
+            else
+              echo "<li><strong>$OS:</strong> (No report found for latest build)</li>" >> "$SITE_DIR/index.html"
+            fi
+          done
+
+          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2>" >> "$SITE_DIR/index.html"
+          
+          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
+          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
+          
+          LABELS=""
+          PASS_COUNTS=""
+          FAIL_COUNTS=""
+          UNSTABLE_COUNTS=""
+          
+          echo "<ul>" >> "$SITE_DIR/index.html"
+          # Generate the visible list of links (newest to oldest)
+          for BUILD in $BUILDS; do
+            TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
+            TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
+
+            echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/'>Ubuntu</a> / <a href='${BUILD}/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
+          done
+          echo "</ul>" >> "$SITE_DIR/index.html"
+          
+          # Gather data for the chart (oldest to newest)
+          for BUILD in $CHART_BUILDS; do
+            TOTAL_PASS=0
+            TOTAL_FAIL=0   
+            TOTAL_UNSTABLE=0 
+            
+            for OS in ubuntu-latest windows-latest; do
+              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/widgets/summary.json"
+              
+              if [ -f "$SUMMARY_FILE" ]; then
+                STATS=$(jq -r '[.statistic.passed // 0, .statistic.failed // 0, .statistic.broken // 0] | @tsv' "$SUMMARY_FILE" 2>/dev/null)
+                read -r PASS_COUNT FAIL_COUNT BROKEN_COUNT <<< "$STATS"
+
+                TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
+                TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
+                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT))
+              fi
+            done
+            
+            LABELS="$LABELS'$BUILD',"
+            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
+            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
+            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
+          done
+          
+          # Inject Chart.js code
+          echo "<div id='chart-container'>
+          <canvas id='trendChart'></canvas>
+          </div>
+          <script>
+          const ctx = document.getElementById('trendChart').getContext('2d');
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: [${LABELS%,}],
+              datasets: [
+                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
+                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
+                {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
+              ]
+            },
+            options: { 
+              responsive: true, 
+              maintainAspectRatio: false, 
+              plugins: { legend: { position: 'top' } }, 
+              scales: { 
+                y: { 
+                  beginAtZero: true, 
+                  stepSize: 1,
+                  title: { display: true, text: 'Total Number of Tests' }
+                },
+                x: {
+                  title: { display: true, text: 'Build Number' }
+                }
+              } 
+            }
+          });
+          </script>
+          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ env.SITE_DIR }}
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Upload Allure History Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-history
+          path: ${{ env.SITE_DIR }}
+          retention-days: 7
+
+      - name: Add Workflow Summary (Badges)
+        run: |
+          PAGE_URL=${{ steps.deployment.outputs.page_url }}
+          BASE_URL="${PAGE_URL%/}"
+          TEST_STATUS=${{ needs.test.outputs.test_outcome }}
+
+          if [[ "$TEST_STATUS" == "FAIL" ]]; then
+            STATUS_ICON="❌"
+            STATUS_TEXT="Failed (setup/config error)"
+          elif [[ "$TEST_STATUS" == "UNSTABLE" ]]; then
+            STATUS_ICON="⚠️"
+            STATUS_TEXT="Unstable (some tests failed)"
+          else
+            STATUS_ICON="✅"
+            STATUS_TEXT="All tests passed"
+          fi
+
+          echo "### 🤖 GPU Benchmarks CI/CD" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Report History](https://img.shields.io/badge/All-Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build #${{ github.run_number }} | Status: $STATUS_ICON $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY

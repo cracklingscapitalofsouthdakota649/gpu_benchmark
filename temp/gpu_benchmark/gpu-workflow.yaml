@@ -1,0 +1,19 @@
+  # Define the resources required, specifically requesting a GPU.
+    # This part is crucial for GPU workloads!
+    resources:
+      limits:
+        # Requesting 1 Intel GPU resource (Intel(R) HD Graphics Gen11). 
+        # 'intel.com/gpu' is the standard resource name used by the Intel Device Plugin.
+        intel.com/gpu: 1 
+
+    # Set a restart policy appropriate for a benchmark job.
+    # This container is designed to run until completion.
+    # The default is Always, which might not be ideal for a short-lived benchmark.
+    # However, for a standard deployment we'll use the default. If this was a one-off job, 
+    # a 'Job' resource would be more appropriate.
+    imagePullPolicy: Always
+
+    # Define the port the application inside the container is listening on (if any).
+    # Assuming the benchmark has a web interface or status page on port 8080.
+    ports:
+    - containerPort: 8080
