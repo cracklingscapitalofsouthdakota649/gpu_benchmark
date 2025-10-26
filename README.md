@@ -290,6 +290,6 @@ Released under the **MIT License** — free to use, modify, and distribute.
 
 ---
 
-📬 *Contact:* [ontario1998@gmail.com](mailto:ontario1998@gmail.com)  
+📬 *Contact:* Bang Thien Nguyen [ontario1998@gmail.com](mailto:ontario1998@gmail.com)  
 
 > _“Measure performance before you optimize — know your hardware before you test your code.”_
