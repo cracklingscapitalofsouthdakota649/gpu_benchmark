@@ -192,6 +192,7 @@ gpu_benchmark/
 ├─ .github/                            # GitHub Actions CI/CD workflows
 ├─ venv310/                            # Virtual environment (auto-created)
 └─ .benchmarks/                        # Pytest-benchmark history
+```
 
 ---
 
