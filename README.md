@@ -8,6 +8,30 @@ and interactive dashboards to quickly identify bottlenecks and optimize model ex
 
 ---
 
+## 🛠️ End-to-End DevOps & Kubernetes Workflow
+
+This project is built on a comprehensive CI/CD pipeline and an automated Kubernetes deployment workflow:
+
+### 1. Development & Testing (Local/CI)
+* **Testing**: Developers run benchmarks locally using **Pytest** with specific markers (`-m gpu`, `-m cpu`) to validate performance and collect detailed results.
+* **CI/CD (GitHub Actions / Jenkins)**: The **`ci.yml`** workflow in GitHub Actions (or an equivalent Jenkins pipeline) is triggered upon code changes.
+    * It executes the **benchmark tests** against various hardware configurations.
+    * It uses **Docker** to ensure a consistent, reproducible environment for testing.
+    * It generates **Allure Reports** and plots system metrics (`scripts/plot_gpu_metrics.py`).
+
+### 2. Packaging & Publishing
+* **Docker Image Creation**: Using one of the provided `Dockerfile` variants (`Dockerfile.mini`, `Dockerfile.report`), a Docker image containing the test environment, report server, and dependencies is built.
+* **Registry Push**: The final image is tagged and pushed to **Docker Hub** (or a private registry).
+
+### 3. Automated Kubernetes Deployment
+The **`deploy_gpu_workflow.py`** script manages the final deployment to a Kubernetes cluster:
+* **Cluster Cleanup**: It first runs `kubectl delete deployment --all` for a clean state.
+* **Dynamic GPU Detection**: It scans cluster nodes for available extended GPU resources (e.g., `gpu.intel.com/i915`, `nvidia.com/gpu`).
+* **Resource Allocation**: The deployment manifest is dynamically configured to request the detected **GPU resource** or fall back to standard **CPU limits (1 core / 1Gi)**.
+* **Deployment & Access**: It creates the optimized Kubernetes Deployment and Service. Once the Pod is running, it initiates a blocking **`kubectl port-forward`** to map the cluster service (Port 80) to your local machine (Port 8080), allowing instant, interactive access to the Allure Report dashboard via `http://127.0.0.1:8080`.
+
+---
+
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.9%2B-red.svg?style=for-the-badge&logo=PyTorch-2)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.20%2B-yellow.svg?style=for-the-badge&logo=TensorFlow-2)
 ![Pytest](https://img.shields.io/badge/pytest-8.4%2B-green.svg?style=for-the-badge&logo=pytest)
@@ -98,51 +122,76 @@ run_docker.bat
 
 ```
 gpu_benchmark/
+├─ Dockerfile                          # Main Docker build file
+├─ Dockerfile.mini                     # Minimal Docker build file
+├─ Dockerfile.report                   # Docker build file for the report server
 ├─ README.md
-├─ gpu_benchmark.py           # Setup & execution script
-├─ pytest.ini                 # Pytest configuration
-├─ supports/                  # GPU detection & utility scripts
-│  └─ gpu_check.py
-├─ scripts/
-│  ├─ plot_gpu_metrics.py     # Generate charts for Allure
-│  └─ system_metrics.py       # Capture CPU/GPU metrics
-├─ .github/                   # GitHub Actions CI/CD workflows
-│  ├─ scripts/
-│  │  ├─ preflight.py         # CI environment check script
-│  │  └─ run_tests.sh         # Shell script to execute tests in CI
-│  └─ workflows/
-│     └─ ci.yml               # GitHub Actions CI configuration file
-├─ tests/                     # Benchmark test cases
+├─ requirements.txt
+├─ pytest.ini                          # Pytest configuration
+├─ g.bat                               # Convenience batch file
+├─ gpu_benchmark.py                    # Main setup & execution script
+├─ deploy_gpu_workflow.py              # Kubernetes GPU auto-detection and deployment script
+├─ run_docker.py                       # Script to run tests inside Docker
+├─ run_gpu_benchmark.bat               # Windows batch script to run benchmarks
+├─ run_kubernestes.py                  # Kubernetes execution wrapper
+├─ gpu-workflow.yaml                   # Kubernetes manifest for deployment
+├─ gpu-benchmark-cpu-deployment.yaml   # Kubernetes manifest for CPU-only deployment
+├─ __init__.py
+├─ allure-report/                      # Static Allure HTML output directory
+├─ allure-results/                     # Pytest-Allure raw results directory
+├─ images/                             # Documentation image assets
+│  ├─ allure_report.jpg
+│  └─ gpu_cpu_utilization.png
+├─ scripts/                            # Utility scripts for metrics, plotting, and trend analysis
 │  ├─ __init__.py
-│  ├─ conftest.py             # Fixtures for tests
-│  ├─ device_utils.py         # Utilities for device handling
-│  ├─ test_amd_gpu_accelerator.py # AMD-specific features
-│  ├─ test_cpu_reference.py   # CPU-only benchmarks
-│  ├─ test_data_preprocessing.py # Data I/O and transform speed
-│  ├─ test_directml_gpu_accelerator.py # DirectML-specific features
-│  ├─ test_gpu_compute.py     # General GPU compute benchmarks
-│  ├─ test_gpu_convnet.py     # Convolutional network throughput
-│  ├─ test_gpu_matrix_mul.py  # GEMM and linear algebra speed
-│  ├─ test_gpu_memory.py      # VRAM allocation and bandwidth
-│  ├─ test_gpu_mixed_precision.py # AMP/FP16 performance validation
-│  ├─ test_gpu_model_inference.py # End-to-end model inference
-│  ├─ test_gpu_stress.py      # Heavy-load and endurance tests
-│  ├─ test_gpu_transformer.py # Transformer/attention block speed
-│  ├─ test_idle_baseline.py   # Baseline for system metrics
-│  ├─ test_inference_load.py  # Load testing for inference
-│  ├─ test_intel_gpu_accelerator.py # Intel-specific features
-│  ├─ test_io_accelerator.py  # General I/O and transfer bandwidth
-│  ├─ test_multi_gpu.py       # Multi-GPU/DDP/parallel tests
-│  ├─ test_network_io_accelerator.py # Network/distributed I/O
-│  ├─ test_nvidia_gpu_accelerator.py # NVIDIA-specific features
-│  ├─ test_nvidia_real_gpu.py # NVIDIA Comprehensive real-world benchmarks
-│  ├─ test_nvidia_tensorrt_cudnn.py # NVIDIA TensorRT/cuDNN acceleration
-│  └─ test_parallel_training.py # Data/model parallelism speed
-├─ venv310/                   # Virtual environment (auto-created)
-├─ allure-results/            # Benchmark reports
-└─ .benchmarks/               # Pytest-benchmark history
-
-```
+│  ├─ gpu_utils.py
+│  ├─ plot_gpu_metrics.py               # Generate charts for Allure
+│  ├─ system_metrics.py                 # Capture CPU/GPU system metrics
+│  └─ update_trend.py
+├─ supports/                           # GPU detection and telemetry logic
+│  ├─ __init__.py
+│  ├─ categories.json
+│  ├─ environments.properties
+│  ├─ executor.json
+│  ├─ gpu_check.py                      # Detects available hardware devices
+│  ├─ gpu_monitor.py                    # Real-time GPU monitoring
+│  ├─ performance_trend.py
+│  ├─ telemetry_collector.py            # Gathers performance data
+│  ├─ telemetry_hook.py
+│  ├─ telemetry_trend.py
+│  ├─ telemetry_visualizer.py
+│  ├─ ubuntu.properties
+│  └─ windows.properties
+├─ tests/                              # Benchmark test cases
+│  ├─ __init__.py
+│  ├─ conftest.py                       # Pytest fixtures and hooks
+│  ├─ device_utils.py                   # Utilities for device handling
+│  ├─ test_amd_gpu_accelerator.py
+│  ├─ test_cpu_reference.py             # CPU-only benchmarks
+│  ├─ test_data_preprocessing.py
+│  ├─ test_directml_gpu_accelerator.py
+│  ├─ test_gpu_compute.py
+│  ├─ test_gpu_convnet.py
+│  ├─ test_gpu_matrix_mul.py
+│  ├─ test_gpu_memory.py
+│  ├─ test_gpu_mixed_precision.py
+│  ├─ test_gpu_model_inference.py
+│  ├─ test_gpu_stress.py
+│  ├─ test_gpu_tensorflow_benchmark.py
+│  ├─ test_gpu_transformer.py
+│  ├─ test_idle_baseline.py
+│  ├─ test_inference_load.py
+│  ├─ test_intel_gpu_accelerator.py
+│  ├─ test_io_accelerator.py
+│  ├─ test_multi_gpu.py
+│  ├─ test_network_io_accelerator.py
+│  ├─ test_nvidia_gpu_accelerator.py
+│  ├─ test_nvidia_real_gpu.py
+│  ├─ test_nvidia_tensorrt_cudnn.py
+│  └─ test_parallel_training.py
+├─ .github/                            # GitHub Actions CI/CD workflows
+├─ venv310/                            # Virtual environment (auto-created)
+└─ .benchmarks/                        # Pytest-benchmark history
 
 ---
 

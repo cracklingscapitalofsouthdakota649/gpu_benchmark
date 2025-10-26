@@ -25,7 +25,6 @@ tmp/
 
 Ignore test results and reports
 allure-results/
-allure-report/
 reports/
 images/
 *.log
