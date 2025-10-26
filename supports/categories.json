@@ -1,0 +1,69 @@
+[
+    {
+        "name": "🚨 Critical GPU/CPU Failures",
+        "description": "Tests that failed due to hardware or driver-level issues during GPU benchmarking.",
+        "matchedStatuses": ["failed"],
+        "traceRegex": ".*(CUDA\nROCM\nOpenCL\nIntel GPU\nDirectML).*",
+        "messageRegex": ".*(device not found\nCUDA error\nillegal memory access\nGPU failure).*"
+    },
+    {
+        "name": "⚙️ Environment / Configuration Errors",
+        "description": "Failures caused by missing libraries, misconfigured environments, or dependency issues.",
+        "matchedStatuses": ["broken"],
+        "messageRegex": ".*(ModuleNotFoundError\nImportError\nNo module named\nmissing DLL\ntorch not installed).*"
+    },
+    {
+        "name": "🐍 Python Runtime Exceptions",
+        "description": "Uncaught Python exceptions during test execution.",
+        "matchedStatuses": ["failed"],
+        "traceRegex": ".*(ValueError\nTypeError\nAttributeError\nKeyError\nIndexError\nJSONDecodeError).*"
+    },
+    {
+        "name": "📉 Performance Regression",
+        "description": "Performance dropped significantly compared to previous benchmark baselines.",
+        "matchedStatuses": ["failed"],
+        "messageRegex": ".*(below expected FPS\nthroughput regression\nperformance degradation).*"
+    },
+    {
+        "name": "🧠 Memory / Resource Issues",
+        "description": "Tests that failed due to out-of-memory errors or excessive resource consumption.",
+        "matchedStatuses": ["failed"],
+        "messageRegex": ".*(out of memory\nMemoryError\nresource exhausted\nallocation failed).*"
+    },
+    {
+        "name": "⏱️ Timeout / Deadlock",
+        "description": "Tests that exceeded the allowed runtime or deadlocked under load.",
+        "matchedStatuses": ["failed"],
+        "messageRegex": ".*(timeout\ntimed out\nhung\ndeadlock\nnot responding).*"
+    },
+    {
+        "name": "🔧 Infrastructure / Reporting Errors",
+        "description": "Allure, benchmark, or plotting tool issues encountered during reporting.",
+        "matchedStatuses": ["broken"],
+        "traceRegex": ".*(matplotlib\nallure\ntkinter\nplot_gpu_metrics\nallure.*generate).*"
+    },
+    {
+        "name": "📊 Benchmark Validation Errors",
+        "description": "Test benchmark results did not meet the defined thresholds.",
+        "matchedStatuses": ["failed"],
+        "messageRegex": ".*(mean.*NoneType\nFPS mismatch\nexpected.*greater\nbenchmark.*invalid).*"
+    },
+    {
+        "name": "⚡ Stress / Stability Issues",
+        "description": "Stress tests where system became unstable under high computational load.",
+        "matchedStatuses": ["failed"],
+        "messageRegex": ".*(stress.*fail\nGPU crash\nthermal\nsystem unstable).*"
+    },
+    {
+        "name": "📦 Missing Dependency Errors",
+        "description": "Failures caused by missing pytest dependencies such as colorama, exceptiongroup, iniconfig, packaging, pygments, tomli, and py-cpuinfo.",
+        "matchedStatuses": ["broken"],
+        "messageRegex": ".*(No module named 'colorama'|No module named 'exceptiongroup'|No module named 'iniconfig'|No module named 'packaging'|No module named 'pygments'|No module named 'tomli'|No module named 'py_cpuinfo').*"
+    },
+	    {
+        "name": "✅ Passed Benchmarks",
+        "description": "All performance tests executed successfully and met expectations.",
+        "matchedStatuses": ["passed"]
+    }
+	
+]

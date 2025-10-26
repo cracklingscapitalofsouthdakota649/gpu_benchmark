@@ -1,0 +1,15 @@
+{
+  "name": "GPU Benchmark Executor",
+  "type": "CI_Pipeline",
+  "url": "${env.JENKINS_URL}",
+  "buildOrder": "${env.BUILD_ID}",
+  "buildName": "GPU Benchmark #${env.BUILD_ID}",
+  "buildUrl": "${env.BUILD_URL}",
+  "reportUrl": "${env.BUILD_URL}artifact/${ALLURE_REPORT_DIR}/index.html",
+  "description": "Benchmark suite for GPU performance testing (CUDA/ROCm/DirectML/Intel GPU)",
+  "data": {
+    "Validation Engineer": "TBD",
+    "Product Model": "Nvdia GPU, AMD GPU, Intel GPU ",
+    "Test Framework": "Pytest, PyTorch"
+  }
+}
