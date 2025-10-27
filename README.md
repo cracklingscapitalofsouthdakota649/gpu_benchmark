@@ -1,6 +1,6 @@
 # 🤖 GPU/CPU Benchmark Suite
 
-**A Universal Benchmarking Framework for PyTorch Performance.**
+**A Universal Benchmarking Framework for PyTorch-2, Tensorflow-2 Performance.**
 
 Evaluate and compare GPU and CPU performance with unparalleled accuracy using PyTorch-2.9, Tensorflow-2.20, pytest, and detailed Allure reporting. This robust framework offers 
 out-of-the-box support for heterogeneous hardware, including NVIDIA, AMD, Intel, DirectML, and standard CPU-only execution. Generate clear performance metrics 

@@ -71,7 +71,6 @@ def _status_clear():
     """Clears the dynamically printed status line."""
     global _LAST_STATUS_LEN
     if _LAST_STATUS_LEN:
-        # Write carriage return, spaces to overwrite, and another carriage return
         sys.stdout.write("\r" + " " * _LAST_STATUS_LEN + "\r")
         sys.stdout.flush()
         _LAST_STATUS_LEN = 0
@@ -93,13 +92,12 @@ def _copy_tree(src: str, dst: str):
     shutil.copytree(src, dst)
 
 def _is_test_path_or_file(selector: str) -> bool:
-    """
-    Returns True if selector looks like a test path/file instead of a pytest marker.
-    """
+    """Returns True if selector looks like a test path/file instead of a pytest marker."""
     if not selector:
         return True
     s = selector.strip().replace("\\", "/")
     return s.endswith(".py") or s.startswith("tests/") or s.startswith("./tests/")
+
 
 # ------------------------------
 # CTRL-C HANDLER
@@ -129,18 +127,14 @@ def execute_command(
     command: str,
     error_message: str,
     check_output: bool = False,
-    exit_on_error: bool = False,
+    exit_on_error: bool = True,
     docker_build_status: bool = False,
     docker_push_status: bool = False,
 ):
-    """
-    Executes a shell command and handles errors, with streaming status for Docker operations.
-    (Now uses _status_print for dynamic single-line updates)
-    """
+    """Executes a shell command and handles errors, with streaming status for Docker operations."""
     if docker_build_status or docker_push_status:
         if docker_build_status:
             print(f"Starting Docker Build with Live Status...")
-        # stream output
         p = subprocess.Popen(
             command,
             shell=True,
@@ -154,23 +148,18 @@ def execute_command(
         total_steps = 0
         step_description = "Initializing..."
         layer_statuses = {}
-        return_code = None
 
         for line in iter(p.stdout.readline, ''):
-            # Build progress
             if docker_build_status:
                 match_progress = STEP_PROGRESS_RE.search(line)
                 match_desc = STEP_DESC_RE.search(line)
-
                 if match_progress:
                     current_step = int(match_progress.group(1))
                     total_steps = int(match_progress.group(2))
-
                 if match_desc:
                     step_description = match_desc.group(1).split('\n')[0].strip()
                     if len(step_description) > 60:
                         step_description = step_description[:60] + "..."
-
                 if total_steps > 0:
                     progress_percent = int((current_step / total_steps) * 100)
                     status_line = (
@@ -178,9 +167,7 @@ def execute_command(
                         f"Task: {step_description:<55} "
                         f"{time.strftime('%H:%M:%S')}"
                     )
-                    _status_print(status_line) # Use dynamic status update
-
-            # Push progress
+                    _status_print(status_line)
             elif docker_push_status:
                 match_push_progress = DOCKER_PUSH_PROGRESS_RE.search(line)
                 if match_push_progress:
@@ -199,16 +186,14 @@ def execute_command(
                             f"Layers: {sum(1 for pcent in layer_statuses.values() if pcent < 100)} active / {total_layers} total "
                             f"{time.strftime('%H:%M:%S')}"
                         )
-                        _status_print(status_line) # Use dynamic status update
-
-            # echo important lines
+                        _status_print(status_line)
             if "ERROR" in line.upper() or "FATAL" in line.upper() or "Login Succeeded" in line:
                 _status_clear()
                 print(line.strip())
 
         p.stdout.close()
         return_code = p.wait()
-        _status_clear() # Clear status line after process completes
+        _status_clear()
 
         if return_code != 0:
             print("\n==========================================================")
@@ -223,7 +208,6 @@ def execute_command(
             print("✅ Docker build completed successfully.")
         return 0
 
-    # Non-streaming path
     try:
         result = subprocess.run(
             command,
@@ -253,76 +237,27 @@ def execute_command(
     except KeyboardInterrupt:
         _sigint_handler(None, None)
 
-def docker_image_exists(image_tag: str) -> bool:
-    """Checks if a Docker image with the given tag exists locally."""
-    print(f"Checking for local image: {image_tag}")
-    try:
-        subprocess.run(
-            f"docker image inspect {image_tag}",
-            shell=True,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        return True
-    except subprocess.CalledProcessError:
-        return False
-
-
-def check_dependencies():
-    """Verifies that essential command-line tools are installed."""
-    print("--- Step 1: Checking Dependencies ---\n")
-    dependencies = ["docker", "pytest", "allure"]
-    missing = []
-    for dep in dependencies:
-        if shutil.which(dep) is None:
-            missing.append(dep)
-    if missing:
-        print("FATAL ERROR: The following dependencies are missing:")
-        for dep in missing:
-            print(f"- {dep}")
-        print("\nPlease install the missing dependencies (Docker, pytest, 'allure-commandline').")
-        sys.exit(1)
-    print("✅ All dependencies found.")
-    return 0
-
 
 # ------------------------------
-# Test execution (with mini/custom behavior)
+# Test execution
 # ------------------------------
 def run_tests(suite_marker: str, dockerfile_path: str):
-    """
-    Runs tests inside the Docker container.
-    If using Dockerfile.mini, isolate preprocessing test only (move conftest, run one file).
-    Else (custom Dockerfile), standard pytest discovery using -m <suite_marker>.
-    """
     print(f"\n--- Step 4: Running Tests (Suite: {suite_marker}) ---")
-
-    # Reset allure results folder
     if os.path.exists(ALLURE_RESULTS_DIR):
         shutil.rmtree(ALLURE_RESULTS_DIR)
     os.makedirs(ALLURE_RESULTS_DIR, exist_ok=True)
 
     CONTAINER_ALLURE_RESULTS_DIR = "/app/allure-results"
-
-    # Volume mounts (Windows-safe quoting)
-    volume_mounts = (
-        f"-v {q(ALLURE_RESULTS_DIR)}:{CONTAINER_ALLURE_RESULTS_DIR} "
-        f"-v {q(SUPPORTS_DIR)}:/app/supports "
-    )
+    volume_mounts = f"-v {q(ALLURE_RESULTS_DIR)}:{CONTAINER_ALLURE_RESULTS_DIR} -v {q(SUPPORTS_DIR)}:/app/supports "
     print("  ℹ️ Mounting 'supports' directory.")
 
-    # ------------------------------
-    # Dockerfile.mini → isolate preprocessing test only
-    # ------------------------------
     if dockerfile_path == DEFAULT_DOCKERFILE:
         target_test = suite_marker if suite_marker.endswith(".py") else DEFAULT_TEST_FILE
         print(f"  ⚠️ Using Dockerfile.mini → running isolated test: {target_test}")
         docker_run_command = (
             f"docker run --rm {volume_mounts}"
             f"{LOCAL_IMAGE_TAG} "
-            f'bash -c "'
-            f'if [ -f /app/tests/conftest.py ]; then mv /app/tests/conftest.py /app/tests/conftest.bak; fi && '
+            f'bash -c "if [ -f /app/tests/conftest.py ]; then mv /app/tests/conftest.py /app/tests/conftest.bak; fi && '
             f'pytest /app/{target_test} --ignore=supports/*.py '
             f'--alluredir={CONTAINER_ALLURE_RESULTS_DIR} && '
             f'if [ -f /app/tests/conftest.bak ]; then mv /app/tests/conftest.bak /app/tests/conftest.py; fi"'
@@ -337,7 +272,11 @@ def run_tests(suite_marker: str, dockerfile_path: str):
         )
 
     print(f"Executing: {docker_run_command}")
-    execute_command(docker_run_command, "Test execution failed. Check test logs above.")
+    execute_command(
+        docker_run_command,
+        "Test execution failed. Check test logs above.",
+        exit_on_error=False  # Allow allure generation even if tests fail
+    )
     print("✅ Tests completed and results saved to allure-results.")
 
 
@@ -345,18 +284,9 @@ def run_tests(suite_marker: str, dockerfile_path: str):
 # Report generation & packaging
 # ------------------------------
 def generate_report(build_number: str, selector: str):
-    """
-    Generates the Allure HTML report, adds metadata, and packages it into a Docker image.
-    Uses `ALLURE_REPORT_DIR` as the Docker build CONTEXT to avoid .dockerignore issues.
-    Also persists history to `.allure-history/` so 'Trend' is populated from run #2 onward.
-    """
     print("\n--- Step 5: Generating Allure Report and Packaging ---")
-
     DOCKER_HUB_USER_FOR_LINKS = f"{DOCKER_USER}"
     REPORT_REPO_BASE_URL = f"https://hub.docker.com/r/{DOCKER_HUB_USER_FOR_LINKS}/{REPO_BASENAME}-report"
-
-    # 5.1. executor.json
-    print(" 5.1. Creating Allure executor.json for build metadata...")
     try:
         os.makedirs(ALLURE_RESULTS_DIR, exist_ok=True)
         executor_data = {
@@ -370,14 +300,9 @@ def generate_report(build_number: str, selector: str):
         }
         with open(os.path.join(ALLURE_RESULTS_DIR, "executor.json"), "w") as f:
             json.dump(executor_data, f, indent=4)
-        print(f" ✅ executor.json created for Build #{build_number}.")
-    except ValueError:
-        print("⚠️ WARNING: Could not set buildOrder. Ensure build_number is a numeric string.")
-    except Exception as e:
-        print(f"⚠️ WARNING: Failed to create executor.json: {e}")
+    except Exception:
+        pass
 
-    # 5.2. environment.properties
-    print(" 5.2. Creating Allure environment.properties for report details...")
     try:
         environment_data = [
             f"Report Title={REPO_BASENAME.title()}: {selector} Run #{build_number}",
@@ -387,95 +312,66 @@ def generate_report(build_number: str, selector: str):
         ]
         with open(os.path.join(ALLURE_RESULTS_DIR, "environment.properties"), "w") as f:
             f.write('\n'.join(environment_data) + '\n')
-        print(" ✅ environment.properties created.")
-    except Exception as e:
-        print(f"⚠️ WARNING: Failed to create environment.properties: {e}")
+    except Exception:
+        pass
 
-    # --- 5.3. History setup and report generation ---
-    # Strategy:
-    # 1) Prefer previously cached history (persistent across runs): .allure-history/
-    # 2) Fall back to history inside the last HTML report: allure-report/history
-    # 3) If neither exists (first-ever run), proceed without history.
     results_history = os.path.join(ALLURE_RESULTS_DIR, "history")
     cache_history = HISTORY_CACHE_DIR
     report_history = os.path.join(ALLURE_REPORT_DIR, "history")
-
     history_src = None
     if os.path.isdir(cache_history) and os.listdir(cache_history):
         history_src = cache_history
-        print(f" ✅ Using cached history from {cache_history}")
     elif os.path.isdir(report_history) and os.listdir(report_history):
         history_src = report_history
-        print(f" ✅ Using previous report history from {report_history}")
-    else:
-        print(" ℹ️ No previous history found. Trend will appear after the 2nd run.")
-
     if history_src:
         try:
             _copy_tree(history_src, results_history)
-            print(" ✅ History copied into results for trend computation.")
-        except Exception as e:
-            print(f"⚠️ WARNING: Could not copy history into results: {e}")
+        except Exception:
+            pass
 
-    # Generate report
     if os.path.exists(ALLURE_REPORT_DIR):
         shutil.rmtree(ALLURE_REPORT_DIR)
-
     allure_generate_command = f"allure generate {q(ALLURE_RESULTS_DIR)} --clean -o {q(ALLURE_REPORT_DIR)}"
-    execute_command(
-        allure_generate_command,
-        "Allure report generation failed."
-    )
-    print(f"Report successfully generated to {ALLURE_REPORT_DIR}")
-    print(f"✅ Allure HTML report generated at: {ALLURE_REPORT_DIR}")
-
-    # After generation: refresh the persistent cache from the new report
+    execute_command(allure_generate_command, "Allure report generation failed.")
     try:
         new_history = os.path.join(ALLURE_REPORT_DIR, "history")
         if os.path.isdir(new_history) and os.listdir(new_history):
             _ensure_dir(HISTORY_CACHE_DIR)
             _copy_tree(new_history, HISTORY_CACHE_DIR)
-            print(f" ✅ Updated persistent history cache at {HISTORY_CACHE_DIR}")
-        else:
-            print(" ⚠️ Generated report has no history folder; cache not updated.")
-    except Exception as e:
-        print(f"⚠️ WARNING: Could not update persistent history cache: {e}")
+    except Exception:
+        pass
 
-    # --- 5.4. Package report into Docker Image using REPORT DIR as BUILD CONTEXT ---
-    print("\n 5.4. Packaging Allure Report into a Deployable Docker Image")
-
-    report_tag_version = f"{REPORT_IMAGE_TAG_BASE}:{build_number}"
-    report_tag_latest = f"{REPORT_IMAGE_TAG_BASE}:latest"
-
-    # Create Dockerfile.report at project root (referenced via -f), with robust COPY
     dockerfile_content = """\
 FROM nginx:alpine
-
-# Copy the generated report into the Nginx web root
-# Using the report folder as the build CONTEXT, so COPY . works reliably
 COPY ./ /usr/share/nginx/html/
 EXPOSE 8080
-# Use a standard CMD for Nginx to run in the foreground
 CMD ["nginx", "-g", "daemon off;"]    
 """
     dockerfile_path = os.path.join(PROJECT_ROOT, "Dockerfile.report")
     with open(dockerfile_path, "w") as f:
         f.write(dockerfile_content)
-    print(f" Dockerfile.report created for tag {report_tag_version}.")
-
-    # IMPORTANT: build context is the ALLURE_REPORT_DIR to avoid .dockerignore exclusions
+    report_tag_version = f"{REPORT_IMAGE_TAG_BASE}:{build_number}"
+    report_tag_latest = f"{REPORT_IMAGE_TAG_BASE}:latest"
     docker_build_report_command = f"docker build -t {report_tag_version} -f {q(dockerfile_path)} {q(ALLURE_REPORT_DIR)}"
-    execute_command(
-        docker_build_report_command,
-        f"Failed to build report Docker image {report_tag_version}",
-        docker_build_status=True
-    )
-
+    execute_command(docker_build_report_command, f"Failed to build report Docker image {report_tag_version}", docker_build_status=True)
     docker_tag_command = f"docker tag {report_tag_version} {report_tag_latest}"
-    execute_command(
-        docker_tag_command,
-        f"Failed to tag image {report_tag_version} as {report_tag_latest}"
-    )
+    execute_command(docker_tag_command, f"Failed to tag image {report_tag_version} as {report_tag_latest}")
+
+    # --- 5.5. Trim Allure Trend History to Last 6 Builds ---
+    try:
+        history_file = os.path.join(HISTORY_CACHE_DIR, "history-trend.json")
+        if os.path.exists(history_file):
+            with open(history_file, "r+", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list) and len(data) > 6:
+                    trimmed = data[-6:]
+                    f.seek(0)
+                    json.dump(trimmed, f, indent=4)
+                    f.truncate()
+                    print(f" ✅ Trimmed Allure trend to last 6 builds ({len(trimmed)} retained).")
+    except Exception as e:
+        print(f"⚠️ WARNING: Failed to trim Allure trend history: {e}")
+
     print(f" ✅ Report image tagged as {report_tag_version} and {report_tag_latest}.")
     return report_tag_version, report_tag_latest
 
@@ -545,7 +441,6 @@ def cleanup_docker_artifacts():
     """
     Cleans up dangling images, build cache, and stopped containers using 'docker system prune -a',
     but preserves the gpu-benchmark-local:latest image.
-    Output is suppressed (DEVNULL) to hide verbose cleanup and conflict warnings.
     """
     print("\n--- Step 8: Final Cleanup (Pruning Docker Artifacts) ---")
     
@@ -555,7 +450,6 @@ def cleanup_docker_artifacts():
 
     # Get all image IDs except the preserved one
     try:
-        # Get all image IDs
         result = subprocess.run(
             f"docker images -q | sort | uniq",
             shell=True,
@@ -566,8 +460,6 @@ def cleanup_docker_artifacts():
             universal_newlines=True,
         )
         all_images = result.stdout.strip().splitlines()
-        
-        # Get ID of the image we must preserve
         preserved_id = subprocess.run(
             f"docker images -q {preserve_image}",
             shell=True,
@@ -577,19 +469,16 @@ def cleanup_docker_artifacts():
             encoding="utf-8",
             universal_newlines=True,
         ).stdout.strip()
-        
         removable_images = [i for i in all_images if i and i != preserved_id]
 
-        # Remove containers and unused resources (Suppress output)
-        print("  ℹ️ Pruning containers, volumes, and builder cache...")
-        subprocess.run("docker container prune -f", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run("docker volume prune -f", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run("docker builder prune -f", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Remove containers and unused resources
+        subprocess.run("docker container prune -f", shell=True)
+        subprocess.run("docker volume prune -f", shell=True)
+        subprocess.run("docker builder prune -f", shell=True)
 
-        # Remove all other images explicitly (Suppress output, which hides conflicts)
+        # Remove all other images explicitly
         for img in removable_images:
-            # We don't check=True here because deletion might fail due to conflicts (the thing we are trying to suppress)
-            subprocess.run(f"docker rmi -f {img}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(f"docker rmi -f {img}", shell=True)
 
         print(f"✅ Docker cleanup successful. Preserved: {preserve_image}")
     except Exception as e:
@@ -600,27 +489,19 @@ def cleanup_docker_artifacts():
 # Open report locally
 # ------------------------------
 def open_report():
-    """Starts the Allure web server and returns the process object, or None on failure/fallback."""
-    print("\n--- Step 7: Starting Allure Web Server ---")
+    """Opens the Allure report index.html in the default web browser."""
+    print("\n--- Step 7: Opening Allure Report Locally ---")
     index_file = os.path.join(ALLURE_REPORT_DIR, "index.html")
     allure_bin = shutil.which("allure") or shutil.which("allure.cmd")
-    
-    # Try starting the Allure CLI server (which uses Docker/a local server)
     if allure_bin:
         try:
-            # Use Popen to start the process and return the handle
-            allure_process = subprocess.Popen([allure_bin, "open", ALLURE_REPORT_DIR])
-            print(f"🚀 Server started. Access report at: {index_file}")
-            # Give the server a moment to start up
-            time.sleep(3) 
-            return allure_process
+            subprocess.Popen([allure_bin, "open", ALLURE_REPORT_DIR])
+            print(f"🚀 Opening via Allure CLI at: {index_file}")
+            return
         except Exception as e:
-            print(f"⚠️ CLI server failed to start: {e}. Opening directly in browser instead.")
-
-    # Fallback: Open the local file directly in the browser
+            print(f"⚠️ CLI open failed: {e}")
     webbrowser.open_new_tab(index_file)
     print(f"🚀 Opening directly in browser at: {index_file}")
-    return None # Return None if no process was started
 
 
 # ------------------------------
@@ -628,7 +509,7 @@ def open_report():
 # ------------------------------
 def full_pipeline(build_number: str, suite_marker: str, dockerfile_path: str, dockerfile_was_explicit: bool):
     """Runs the full pipeline."""
-    allure_server_proc = None
+    # Ensure the script runs cleanup even if the main pipeline fails
     try:
         check_dependencies()
 
@@ -664,28 +545,11 @@ def full_pipeline(build_number: str, suite_marker: str, dockerfile_path: str, do
         # --- Step 6: Publish Report Image ---
         publish_image_tags([report_version_tag, report_latest_tag], "Allure Report Image")
 
-        # --- Step 7: Start Allure Server ---
-        # Capture the Popen process object
-        allure_server_proc = open_report()
+        # --- Step 7: Open Report ---
+        open_report()
 
     finally:
-        # --- Step 7.5: Stop Allure Server (NEW STEP: Fixes the cleanup conflict) ---
-        if allure_server_proc and allure_server_proc.poll() is None:
-            print("\n--- Step 7.5: Stopping Allure Web Server ---")
-            try:
-                # Terminate the process (like sending Ctrl+C)
-                allure_server_proc.terminate()
-                # Wait for the process to fully exit
-                allure_server_proc.wait(timeout=5)
-                print("✅ Allure web server stopped successfully.")
-            except subprocess.TimeoutExpired:
-                print("⚠️ Allure server stubborn. Sending SIGKILL.")
-                allure_server_proc.kill()
-            except Exception as e:
-                print(f"❌ Error stopping Allure server: {e}")
-
         # --- Step 8: Final Cleanup (Always runs) ---
-        # Output suppression is implemented inside the cleanup_docker_artifacts function
         cleanup_docker_artifacts()
 
 

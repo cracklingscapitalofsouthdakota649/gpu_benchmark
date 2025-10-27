@@ -15,6 +15,8 @@ import time
 import subprocess
 from typing import Optional, Tuple, Dict, List
 import sys
+import webbrowser # <-- NEW: Import webbrowser
+import threading  # <-- NEW: Import threading for non-blocking browser open
 
 # Import the necessary Kubernetes client libraries
 import kubernetes.client as client
@@ -222,6 +224,9 @@ def create_gpu_deployment(
         resources=client.V1ResourceRequirements(
             limits=resource_limits
         ),
+        # This policy ensures K8s checks the registry, which is good
+        # practice even with immutable tags.
+        image_pull_policy="Always",
     )
 
     template = client.V1PodTemplateSpec(
@@ -243,8 +248,6 @@ def create_gpu_deployment(
     )
 
     # --- Create/Update Deployment ---
-    # Since we added cleanup, we assume the deployment does not exist, but we keep 
-    # the read/replace logic for robustness against non-cleanup runs.
     try:
         apps_v1.read_namespaced_deployment(name=DEPLOYMENT_NAME, namespace=NAMESPACE)
         print(f"  ℹ️ Deployment '{DEPLOYMENT_NAME}' already exists. Updating...")
@@ -279,8 +282,8 @@ def create_cluster_ip_service(core_v1: client.CoreV1Api):
             ports=[
                 client.V1ServicePort(
                     protocol="TCP",
-                    port=LOCAL_PORT,
-                    target_port=80,
+                    port=LOCAL_PORT,    # Service's port (8080)
+                    target_port=80,     # Container's port (80)
                 )
             ],
             type="ClusterIP",
@@ -397,31 +400,53 @@ def wait_for_pod_running(core_v1: client.CoreV1Api, timeout_sec: int) -> Optiona
     print(f"\n❌ Timeout reached ({timeout_sec}s). Pod did not reach 'Running' status.")
     return None
 
+# NEW HELPER FUNCTION to open the browser
+def _open_browser_nonblocking(url: str):
+    """Wait briefly for port-forward to establish, then open URL."""
+    # Give kubectl a moment to bind the port before the browser tries to connect
+    time.sleep(2) 
+    print(f"\n🚀 Attempting to open report in browser: {url}")
+    webbrowser.open_new_tab(url)
 
-def start_port_forward(pod_name: str, local_port: int):
+def start_port_forward(local_port: int):
     """
     --- 6. Starting Kubectl Port-Forward ---
     Starts a blocking kubectl port-forward command to access the report service.
+    Now includes a call to automatically open the report in the browser.
     """
     print("\n--- 6. Starting Kubectl Port-Forward ---")
     
-    # Command: kubectl port-forward <pod-name> <local-port>:<container-port>
+    # Command: kubectl port-forward service/<service-name> <local-port>:<service-port>
+    # The service port is LOCAL_PORT (8080) which maps to targetPort 80.
     cmd: List[str] = [
         "kubectl", 
         "port-forward", 
-        pod_name, 
-        f"{local_port}:80",
+        f"service/{SERVICE_NAME}",
+        f"{local_port}:{LOCAL_PORT}",
         "-n", NAMESPACE,
     ]
+    
+    url = f"http://127.0.0.1:{local_port}"
     print(f"Executing command: {' '.join(cmd)}")
-    print(f"Access the Allure report at: {COLOR_BLUE}http://127.0.0.1:{local_port}{COLOR_RESET}")
+    print(f"Access the Allure report at: {COLOR_BLUE}{url}{COLOR_RESET}")
     print("\n*** This command is BLOCKING. Press \033[1;31mCtrl+C\033[0m to stop forwarding and exit. ***")
+    
+    # --- AUTOMATIC BROWSER OPEN FIX ---
+    # Start the browser opening in a new thread immediately
+    browser_thread = threading.Thread(target=_open_browser_nonblocking, args=(url,))
+    browser_thread.daemon = True # Set as daemon so it won't prevent script exit
+    browser_thread.start()
+    # ----------------------------------
+
     try:
+        # Run the blocking command
         subprocess.run(cmd, check=True)
     except FileNotFoundError:
         print("\nERROR: 'kubectl' not found in PATH. Please ensure kubectl is installed.")
     except subprocess.CalledProcessError as e:
-        print(f"\nERROR during port-forwarding: {e}")
+        # Don't print the full error if it's just a user Ctrl+C
+        if e.returncode != 1:
+            print(f"\nERROR during port-forwarding: {e}")
     except KeyboardInterrupt:
         print(f"\nPort forwarding stopped by user (\033[1;31mCtrl+C{COLOR_RESET}). Exiting.")
     except Exception as e:
@@ -434,6 +459,26 @@ if __name__ == '__main__':
     print("        Author: Bang Thien Nguyen - ontario1998@gmail.com                     ")
     print("==============================================================================")
     
+    # --- START: ARGUMENT PARSING AND IMMUTABLE TAG FIX ---
+    if len(sys.argv) < 2:
+        print("\n❌ FATAL: Missing <BUILD_NUMBER> argument.")
+        print("Usage: python deploy_gpu_workflow.py <BUILD_NUMBER>")
+        print("Example: python deploy_gpu_workflow.py 1")
+        print("This build number is used to pull the specific, immutable image tag.")
+        sys.exit(1)
+        
+    BUILD_NUMBER = sys.argv[1]
+    if not BUILD_NUMBER.isdigit():
+        print(f"\n❌ FATAL: BUILD_NUMBER must be an integer. Got: '{BUILD_NUMBER}'")
+        sys.exit(1)
+    
+    # This is the crucial fix:
+    # We override the global IMAGE_NAME to use the specific, immutable build number
+    # tag instead of the mutable ':latest' tag. This defeats all caching issues.
+    IMAGE_NAME = f"{DOCKER_USER}/gpu-benchmark-report:{BUILD_NUMBER}"
+    print(f"\n🎯 Targeting immutable image tag: {IMAGE_NAME}")
+    # --- END: ARGUMENT PARSING AND IMMUTABLE TAG FIX ---
+
     pod_name_to_highlight = None
     
     try:
@@ -452,6 +497,7 @@ if __name__ == '__main__':
         used_resource_key = find_available_gpu_resource_key(core_v1)
         
         # STEP 3: Create/Update Deployment
+        # The script now passes the new, immutable IMAGE_NAME to this function.
         status, key_status = create_gpu_deployment(apps_v1, IMAGE_NAME, used_resource_key)
         print(f"\n[STATUS SUMMARY] Deployment created/updated. Mode: {status}. Resource Key Status: {key_status}")
 
@@ -467,7 +513,9 @@ if __name__ == '__main__':
 
         # STEP 6: Start Port-Forwarding
         if pod_name_to_highlight:
-            start_port_forward(pod_name_to_highlight, LOCAL_PORT)
+            # FIX: Call start_port_forward without pod_name.
+            # It now targets the stable service and automatically opens the browser.
+            start_port_forward(LOCAL_PORT)
         else:
             print("\nWorkflow completed, but the Pod failed to start. Cannot start port-forwarding.")
 
