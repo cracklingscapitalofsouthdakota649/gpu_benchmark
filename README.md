@@ -44,8 +44,8 @@ The **`deploy_gpu_workflow.py`** script manages the final deployment to a Kubern
 ---
 
 ## 💡 Project Overview  
-This framework implements **GPU/CPU performance benchmarking** using `PyTorch`, `Pytest` & `Pytest-benchmark` and leveraging CI/CD and Docker.
-It automatically detects available accelerators, measures inference throughput, GPU/CPU utilization, and memory usage, and produces **interactive Allure reports** for analysis.
+This framework implements **GPU/CPU performance benchmarking** using `PyTorch`, `TensorFlow`, `Pytest`, `Pytest-benchmark`, and leveraging advanced CI/CD with Kubernetes & Docker.
+It automatically detects available accelerators, measures inference throughput, GPU/CPU utilization, I/O, memory usage, etc., and produces **interactive Allure reports** for analysis.
 
 
 | **Component** | **Technology** | **Role** |
@@ -72,16 +72,31 @@ git clone https://github.com/luckyjoy/gpu_benchmark.git
 cd gpu_benchmark
 ```
 
-Run the setup script to create a virtual environment, install dependencies, and detect GPU:  
+Run the setup script to create a virtual environment, install dependencies, and detect GPU on localhost.  
 ```bash
+
 Usage: python gpu_benchmark.py <Build_Number> [suite]
-python gpu_benchmark.py 4 gpu
+-> Run GPU Benchmark with a selected [suite], and generate ALlure report. (No Kubernetes, Docker)
+python gpu_benchmark.py 4 gpu 
+
+Usage: python run_kubernestes.py <BUILD_NUMBER> [SUITE_MARKER or tests] [Dockerfile]
+Example: python run_kubernestes.py 1 tests/test_data_preprocessing.py Dockerfile.custom
+Defaults: Dockerfile=Dockerfile.mini, Test=tests/test_data_preprocessing.py
+-> Builds Docker images, runs GPU Benchmark tests/test_data_preprocessing.py with build number 1, 
+-> Generates Allure report, and pushes Docker images to Docker Hub.
+
+Usage: python deploy_gpu_workflow.py <BUILD_NUMBER>
+Example: python deploy_gpu_workflow.py 1
+-> Creates the necessary Pod deployment and service, monitors Pod creation & reports scheduling events.
+-> Deploys Docker images from Docker Hub, assigns a worker to run the Docker images within the assigned Pod.
+-> Generates Allure Report.
+
 ```
 
 The script will:  
 - Create `venv310` if missing  
 - Detect available GPU or fall back to CPU  
-- Install all required packages including PyTorch  
+- Install all required packages in requirements.txt
 - Run benchmark tests and store results in `allure-results/`  
 
 ---
@@ -93,7 +108,7 @@ Ensure consistent results across systems by running inside Docker.
 ### 🧱 Docker Image  
 Image: **`gpu-benchmark:latest`** — includes:  
 - Python 3.10 or 3.11 environment  
-- PyTorch & required packages preinstalled  
+- Required preinstalled packages
 - Allure CLI for reporting  
 - `/app` as working directory  
 
@@ -234,9 +249,9 @@ Use the commands below to execute specific test suites and generate Allure data 
 python -m venv venv310
 Linux/macOS (Bash/Zsh):	source venv310/bin/activate
 Windows (Command Prompt): call venv310\Scripts\activate
-pytest -m gpu --alluredir=allure-results
-allure serve allure-results
-
+pytest --alluredir=allure-results
+pytest /tests/test_gpu_tensorflow_benchmark --alluredir=allure-results
+pytest -m "gpu or cpu" --alluredir=allure-results
 pytest -m gpu --alluredir=allure-results
 allure serve allure-results
 
