@@ -258,8 +258,9 @@ allure serve allure-results
 ```
 📸 *Allure Report Preview:* 
 
-![Allure Overview Report](images/allure_report.jpg)
+![Build History Dashboard](images/dashboard.jpg)
 
+![Allure Overview Report](images/allure_report.jpg)
 
 ![GPU Utilization](images/gpu_cpu_utilization.png)
 
