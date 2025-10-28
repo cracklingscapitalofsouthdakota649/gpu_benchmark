@@ -77,18 +77,19 @@ Run the setup script to create a virtual environment, install dependencies, and 
 
 Usage:   python gpu_benchmark.py <Build_Number> [suite]
 Example: python gpu_benchmark.py 4 gpu 
--> Run GPU Benchmark with GPU suite on localhost, and generate ALlure report. (No CI/CD, Kubernetes, Docker)
+-> Run GPU Benchmark with GPU suite, build number 4, on localhost, and generate ALlure report. (No CI/CD, Kubernetes, Docker)
 
-Usage:   python run_kubernestes.py <BUILD_NUMBER> [SUITE_MARKER or tests] [Dockerfile]
+Usage:   python run_kubernestes.py <Build_Number> [Suite_marker or tests] [Dockerfile]
 Example: python run_kubernestes.py 1 tests/test_data_preprocessing.py Dockerfile.custom
+Example: python run_kubernestes.py 1 -m gpu Dockerfile.custom
 Defaults: Dockerfile=Dockerfile.mini, Test=tests/test_data_preprocessing.py
--> Builds Docker images, runs GPU Benchmark tests/test_data_preprocessing.py with build number 1, 
+-> Builds Docker images, runs GPU Benchmark [Suite_marker or tests] with build number 1, 
 -> Generates Allure report, and pushes Docker images to Docker Hub.
 
-Usage:   python deploy_gpu_workflow.py <BUILD_NUMBER>
+Usage:   python deploy_gpu_workflow.py <Build_Number>
 Example: python deploy_gpu_workflow.py 1
 -> Creates the necessary Pod deployment and service, monitors Pod creation & reports scheduling events.
--> Deploys Docker images from Docker Hub, assigns a worker to run the Docker images within the assigned Pod.
+-> Deploys Docker image (build tag number 1) from Docker Hub, assigns a worker to run the Docker image within the assigned Pod.
 -> Generates Allure Report.
 
 ```
