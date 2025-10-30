@@ -390,7 +390,7 @@ def validate_and_get_test_args(framework_name, suite_marker, testfile):
         # cross-platform shell parsing of boolean expressions like "navigation or pick or walking"
         return f"pytest -m \"{suite_marker}\" --ignore=features/manual_tests --alluredir={{CONTAINER_ALLURE_RESULTS_DIR}}"
         
-    elif framework_name == "gpu-benchmark":
+    elif framework_name == "gpu-benchmark" or framework_name == "robotics-tdd":
         if testfile:
             # Check 1: Validate file name pattern
             if testfile.startswith("tests/test_") and testfile.endswith(".py"):
@@ -755,7 +755,7 @@ if __name__ == "__main__":
     dockerfile = sys.argv[4] if len(sys.argv) > 4 else "Dockerfile.mini"
 
     # --- NEW VALIDATION: Check for valid FRAMEWORK_NAME ---
-    SUPPORTED_FRAMEWORKS = ["robotics-bdd", "gpu-benchmark"]
+    SUPPORTED_FRAMEWORKS = ["robotics-bdd", "robotics-tdd", "gpu-benchmark"]
     framework_norm = framework_name.lower().replace('_', '-')
 
     if framework_norm not in [f.lower().replace('_', '-') for f in SUPPORTED_FRAMEWORKS]:
