@@ -8,6 +8,17 @@ and interactive dashboards to quickly identify bottlenecks and optimize model ex
 
 ---
 
+![PyTorch](https://img.shields.io/badge/PyTorch-2.9%2B-red.svg?style=for-the-badge&logo=PyTorch-2)
+![TensorFlow](https://img.shields.io/badge/TensorFlow-2.20%2B-yellow.svg?style=for-the-badge&logo=TensorFlow-2)
+![Pytest](https://img.shields.io/badge/pytest-8.4%2B-green.svg?style=for-the-badge&logo=pytest)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=for-the-badge&logo=python3)
+![Kubernetes](https://img.shields.io/badge/kubernetes-ready-yellow?style=for-the-badge&logo=kubernetes)
+![Docker](https://img.shields.io/badge/docker-ready-blue?style=for-the-badge&logo=docker)
+![CI/CD](https://img.shields.io/badge/CI/CD-ready-green?style=for-the-badge&logo=cicd)
+![Allure Report](https://img.shields.io/badge/report-Allure-orange?style=for-the-badge&logo=allure)
+
+---
+
 ## 🛠️ End-to-End DevOps & Kubernetes Workflow
 
 This project is built on a comprehensive CI/CD pipeline and an automated Kubernetes deployment workflow:
@@ -29,17 +40,6 @@ The **`deploy_gpu_workflow.py`** script manages the final deployment to a Kubern
 * **Dynamic GPU Detection**: It scans cluster nodes for available extended GPU resources (e.g., `gpu.intel.com/i915`, `nvidia.com/gpu`).
 * **Resource Allocation**: The deployment manifest is dynamically configured to request the detected **GPU resource** or fall back to standard **CPU limits (1 core / 1Gi)**.
 * **Deployment & Access**: It creates the optimized Kubernetes Deployment and Service. Once the Pod is running, it initiates a blocking **`kubectl port-forward`** to map the cluster service (Port 80) to your local machine (Port 8080), allowing instant, interactive access to the Allure Report dashboard via `http://127.0.0.1:8080`.
-
----
-
-![PyTorch](https://img.shields.io/badge/PyTorch-2.9%2B-red.svg?style=for-the-badge&logo=PyTorch-2)
-![TensorFlow](https://img.shields.io/badge/TensorFlow-2.20%2B-yellow.svg?style=for-the-badge&logo=TensorFlow-2)
-![Pytest](https://img.shields.io/badge/pytest-8.4%2B-green.svg?style=for-the-badge&logo=pytest)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=for-the-badge&logo=python3)
-![Kubernetes](https://img.shields.io/badge/kubernetes-ready-yellow?style=for-the-badge&logo=kubernetes)
-![Docker](https://img.shields.io/badge/docker-ready-blue?style=for-the-badge&logo=docker)
-![CI/CD](https://img.shields.io/badge/CI/CD-ready-green?style=for-the-badge&logo=cicd)
-![Allure Report](https://img.shields.io/badge/report-Allure-orange?style=for-the-badge&logo=allure)
 
 ---
 
@@ -308,5 +308,7 @@ Released under the **MIT License** — free to use, modify, and distribute.
 ---
 
 📬 *Contact:* Bang Thien Nguyen [ontario1998@gmail.com](mailto:ontario1998@gmail.com)  
+
+---
 
 > _“Measure performance before you optimize — know your hardware before you test your code.”_

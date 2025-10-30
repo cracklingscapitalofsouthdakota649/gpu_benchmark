@@ -1,529 +1,757 @@
 # ==============================================================================
-# SCRIPT PURPOSE & WORKFLOW (Auto GPU Detect + CPU Fallback)
-# Filename: deploy_gpu_workflow.py
+# FILENAME: deploy_gpu_workflow.py
+#
+# PURPOSE:
+# This script orchestrates the deployment of a Dockerized application (specifically,
+# an Allure test report server) onto a Kubernetes cluster. It handles resource
+# cleanup, dynamic GPU detection for scheduling, service creation, and local
+# port-forwarding for accessing the deployed application.
+#
+# GOALS:
+# - Automate deployment to Kubernetes from a CI/CD pipeline or local environment.
+# - Intelligently schedule workloads onto GPU-enabled nodes if available.
+# - Provide a reliable fallback to CPU-only deployment.
+# - Ensure a clean cluster state by removing resources before and after execution.
+# - Offer easy local access to the deployed Allure report via port-forwarding.
+#
+# FEATURES:
+# - Dynamic Framework Support: Adapts deployment name, image tag, and local port
+#   based on the framework name provided (e.g., 'robotics-bdd', 'gpu-benchmark').
+# - GPU Auto-Detection: Scans Kubernetes nodes for specified GPU resources
+#   (Intel i915, NVIDIA) using the Kubernetes API.
+# - CPU Fallback: If no suitable GPU is found, deploys using standard CPU/Memory limits.
+# - Robust Cleanup: Deletes all associated Kubernetes resources (Deployments, Services, Pods)
+#   before starting and after completion to prevent conflicts and resource leakage.
+# - Port Forwarding: Automatically starts `kubectl port-forward` to map a local port
+#   to the deployed service, opening the report in the default web browser.
+# - Safe Docker Pruning: Includes an optional, non-aggressive Docker cleanup step
+#   to remove build cache and stopped containers while preserving tagged local images.
+# - Graceful Termination: Handles Ctrl+C (KeyboardInterrupt) during port-forwarding
+#   and cleanup steps to exit cleanly.
 # ==============================================================================
-# This script deploys a benchmark workload to Kubernetes and automatically:
-#   1. Deletes all existing deployments for a clean slate.
-#   2. Detects available GPU extended resource keys on cluster nodes.
-#   3. Configures the Deployment to request that GPU resource or fall back to CPU.
-#   4. Creates the necessary Deployment and Service.
-#   5. Monitors Pod creation, reporting scheduling events.
-#   6. Starts a blocking `kubectl port-forward` to access the application.
-
 import os
 import time
 import subprocess
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Dict, List
 import sys
-import webbrowser # <-- NEW: Import webbrowser
-import threading  # <-- NEW: Import threading for non-blocking browser open
+import webbrowser
+import threading
+import signal
+from datetime import datetime, timezone
 
-# Import the necessary Kubernetes client libraries
 import kubernetes.client as client
 from kubernetes.client.rest import ApiException
 from kubernetes import config
 
-# Static Configuration:
-NAMESPACE = "default"
-SERVICE_NAME = "allure-report-service"
-DEPLOYMENT_NAME = "gpu-benchmark-deployment"
-LOCAL_PORT = 8080 # The local port to use for kubectl port-forward
-# ==============================================================================
+# ------------------ CONFIGURATION & CONSTANTS ------------------
+DOCKER_USER = os.getenv('DOCKER_USER')
+if not DOCKER_USER:
+    print("\n============================================================================")
+    print("❌ CRITICAL: DOCKER_USER is not set.")
+    print("Please set it before running this script:")
+    print("Example: set DOCKER_USER=mydocker_username, set DOCKER_PASS=mydcoker_password")
+    print("=============================================================================")
+    sys.exit(1)
 
-# --- ANSI Color Codes for Output ---
+# Environment flags controlling GPU scheduling behavior
+REQUIRE_GPU = os.getenv("REQUIRE_GPU", "false").lower() == "true"
+STRICT_GPU = os.getenv("STRICT_GPU", "false").lower() == "true"
+# List of GPU resource keys to look for on Kubernetes nodes
+GPU_RESOURCE_KEYS = ["gpu.intel.com/i915", "nvidia.com/gpu"]
+
+# K8S Client Instances (Initialized globally in load_kube_config)
+apps_v1: Optional[client.AppsV1Api] = None
+core_v1: Optional[client.CoreV1Api] = None
+
+# Static K8s Configuration
+NAMESPACE = "default"
+CONTAINER_APP_PORT = 80
+K8S_SERVICE_PORT = 80
+
+# Console color codes
 COLOR_GREEN = '\033[92m'
 COLOR_RESET = '\033[0m'
 COLOR_YELLOW = '\033[93m'
 COLOR_BLUE = '\033[94m'
 
-# --- Environment Configuration ---
-DOCKER_USER = os.getenv("DOCKER_USER", "luckyjoy")
-IMAGE_NAME = os.getenv("IMAGE_NAME", f"{DOCKER_USER}/gpu-benchmark-report:latest")
-REQUIRE_GPU = os.getenv("REQUIRE_GPU", "false").lower() == "true"
-STRICT_GPU = os.getenv("STRICT_GPU", "false").lower() == "true"
+# Global state for port-forwarding process
+PORT_FORWARD_PROCESS: Optional[subprocess.Popen] = None
 
-# Resource keys are vendor-specific (e.g., Intel, NVIDIA).
-GPU_PREFERRED_KEYS_DEFAULT = "gpu.intel.com/i915,nvidia.com/gpu"
-GPU_PREFERRED_KEYS = os.getenv(
-    "GPU_PREFERRED_KEYS", GPU_PREFERRED_KEYS_DEFAULT
-).split(",")
+# Dynamic variables determined in __main__
+SERVICE_NAME: Optional[str] = None
+DEPLOYMENT_NAME: Optional[str] = None
+LOCAL_PORT: Optional[int] = None
+IMAGE_NAME: Optional[str] = None
 
+# Resource cleaning configuration
+CLEANUP_RESOURCES = [
+    ("Deployments", lambda apps, selector: apps.delete_collection_namespaced_deployment(
+        namespace=NAMESPACE, label_selector=selector)),
+    ("Services", lambda core, selector: core.delete_collection_namespaced_service(
+        namespace=NAMESPACE, label_selector=selector)),
+    ("Pods", lambda core, selector: core.delete_collection_namespaced_pod(
+        namespace=NAMESPACE, label_selector=selector))
+]
 
-def print_available_pods(core_v1: client.CoreV1Api, title: str, highlight_pod_name: Optional[str] = None):
+# ------------------ UTILITY FUNCTIONS ------------------
+
+def _format_time_age(creation_timestamp: datetime) -> str:
     """
-    Prints a list of existing pods in the target namespace, highlighting the
-    newly created pod in green if its name is provided.
+    Helper function to calculate and format the age of a Kubernetes resource.
+
+    Feature: Provides human-readable age for pods/resources in the console output.
     """
-    print(f"\n--- {title} Pods in Namespace '{NAMESPACE}' ---")
-    try:
-        pods = core_v1.list_namespaced_pod(namespace=NAMESPACE).items
-        if not pods:
-            print("  (No pods found in this namespace.)")
-            return
-        
-        # Format and print pod details header
-        print(f"  {'NAME':<35} {'STATUS':<15} {'AGE':<10}")
-        print("  " + "="*60)
-        
-        for pod in pods:
-            name = pod.metadata.name
-            phase = pod.status.phase if pod.status else "Unknown"
-            
-            # Calculate age for better logging
-            creation_time = pod.metadata.creation_timestamp
-            age = "N/A"
-            if creation_time:
-                delta = time.time() - creation_time.timestamp()
-                if delta < 60:
-                    age = f"{int(delta)}s"
-                elif delta < 3600:
-                    age = f"{int(delta / 60)}m"
-                else:
-                    age = f"{int(delta / 3600)}h"
+    now_utc = datetime.now(timezone.utc)
+    # Ensure creation_timestamp is timezone-aware for correct comparison
+    if creation_timestamp.tzinfo is None:
+        creation_aware = creation_timestamp.replace(tzinfo=timezone.utc)
+    else:
+        creation_aware = creation_timestamp
 
-            # Apply color if this is the highlighted new pod
-            color_prefix = COLOR_GREEN if name == highlight_pod_name else ""
-            color_suffix = COLOR_RESET if name == highlight_pod_name else ""
+    age_delta = now_utc - creation_aware
+    age_sec = age_delta.total_seconds()
 
-            print(f"  {color_prefix}{name:<35} {phase:<15} {age:<10}{color_suffix}")
-
-    except ApiException as e:
-        print(f"❌ Warning: Could not list pods. API Error: {e.status}")
-    except Exception as e:
-        print(f"❌ Warning: An unexpected error occurred while listing pods: {e}")
+    if age_sec < 60:
+        return f"{int(age_sec)}s"
+    if age_sec < 3600:
+        return f"{int(age_sec/60)}m"
+    if age_sec < 86400:
+        return f"{int(age_sec/3600)}h"
+    return f"{int(age_sec/86400)}d"
 
 
 def load_kube_config():
     """
-    --- 1. Loading Kubernetes Configuration ---
-    Loads Kubernetes configuration from the default location or in-cluster.
+    Loads Kubernetes configuration from default locations (kubeconfig file or in-cluster).
+    Initializes global Kubernetes API client instances (core_v1, apps_v1).
+
+    Feature: Establishes connection to the target Kubernetes cluster.
     """
+    global apps_v1, core_v1
     print("--- 1. Loading Kubernetes Configuration ---")
     try:
         config.load_kube_config()
-        print("✅ Kubernetes config loaded successfully from local environment.")
-    except config.ConfigException:
-        print("ℹ️ Attempting to load in-cluster configuration...")
+        apps_v1 = client.AppsV1Api()
+        core_v1 = client.CoreV1Api()
+        print("✅ Kubernetes config loaded (local) and clients initialized.")
+    except config.ConfigException as local_e:
+        print("   -> Local kubeconfig not found. Trying in-cluster config...")
         try:
             config.load_incluster_config()
-            print("✅ Kubernetes config loaded successfully from in-cluster service account.")
-        except config.ConfigException:
-            print("❌ Failed to load any Kubernetes configuration. Is kubectl configured?")
-            raise
-
-def clean_up_deployments():
-    """
-    --- 1.1. Clean Up Existing Development Deployments ---
-    Deletes ALL Deployments in the target namespace using kubectl.
-    """
-    print(f"\n---- 1.1. Clean Up Existing Development Deployments (Namespace: {NAMESPACE}) ---")
-    
-    cmd: List[str] = [
-        "kubectl", 
-        "delete", 
-        "deployment", 
-        "--all", 
-        "-n", NAMESPACE,
-    ]
-    
-    try:
-        # Run the delete command. capture_output=True to hide stdout/stderr unless there's an error.
-        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
-        
-        if "No resources found" in result.stderr or "No resources found" in result.stdout:
-            print("  ✅ No existing Deployments found. Clean slate.")
-        elif result.returncode == 0:
-            print(f"  ✅ Successfully deleted existing Deployments in namespace '{NAMESPACE}'.")
-        else:
-            # Handle cases where deletion failed, but print the error
-            print(f"  ⚠️ Warning: Deletion command returned non-zero exit code ({result.returncode}). Output:")
-            print(result.stderr.strip())
-            
-    except FileNotFoundError:
-        print("\nERROR: 'kubectl' not found in PATH. Skipping clean up.")
+            apps_v1 = client.AppsV1Api()
+            core_v1 = client.CoreV1Api()
+            print("✅ Kubernetes config loaded (in-cluster) and clients initialized.")
+        except config.ConfigException as cluster_e:
+            print(f"❌ CRITICAL: Failed to load Kubernetes config: Local Error ({local_e}), Cluster Error ({cluster_e})")
+            sys.exit(1)
     except Exception as e:
-        print(f"\nERROR during clean up: {e}")
-        
-    # Wait a moment for resources to terminate
-    time.sleep(3)
+        print(f"❌ CRITICAL: Failed to load Kubernetes config: {e}")
+        sys.exit(1)
 
 
-def find_available_gpu_resource_key(core_v1: client.CoreV1Api) -> Optional[str]:
+def print_available_pods(core_v1_api: client.CoreV1Api, header: str, highlight_pod_name: Optional[str] = None):
     """
-    --- 2. Detecting Available GPU Resources on Cluster Nodes ---
-    Scans all cluster nodes for extended GPU resource keys.
+    Prints a formatted list of pods currently running in the target namespace.
+    Optionally highlights a specific pod name.
+
+    Feature: Provides visibility into the cluster state before and after deployment.
     """
-    print("\n--- 2. Detecting Available GPU Resources on Cluster Nodes ---")
+    print(f"\n--- {header} Pods in Namespace '{NAMESPACE}' ---")
     try:
-        # Get all nodes in the cluster
-        nodes = core_v1.list_node().items
-        if not nodes:
-            print("⚠️ No nodes found in the cluster.")
+        pods = core_v1_api.list_namespaced_pod(namespace=NAMESPACE).items
+        if not pods:
+            print("  (No pods found.)")
+            return
+        
+        print(f"  {'NAME':<50} {'STATUS':<15} {'AGE':<10}")
+        print("  " + "="*75)
+        
+        for pod in pods:
+            name = pod.metadata.name
+            status = pod.status.phase or "Unknown"
+            age_str = "N/A"
+            
+            if pod.metadata.creation_timestamp:
+                age_str = _format_time_age(pod.metadata.creation_timestamp)
+
+            output = f"  {name:<50} {status:<15} {age_str:<10}"
+            
+            if highlight_pod_name and name == highlight_pod_name:
+                print(f"{COLOR_YELLOW}{output}{COLOR_RESET}")
+            else:
+                print(output)
+                
+    except ApiException as e:
+        print(f"❌ Failed to list pods: {e.status} {e.reason}")
+    except Exception as e:
+        print(f"❌ Unexpected error listing pods: {e}")
+
+def _free_local_port(port: int):
+    """
+    Detects and terminates any process currently using the specified local TCP port.
+    Works on both Windows and Unix-like systems.
+
+    Feature: Prevents 'Only one usage of each socket address' errors
+             by ensuring the port is free before starting port-forwarding.
+    """
+    print(f"\n--- Checking if port {port} is already in use ---")
+    try:
+        if os.name == "nt":
+            # Windows: use netstat + taskkill
+            cmd_find = f'netstat -ano | findstr :{port}'
+            output = subprocess.check_output(cmd_find, shell=True).decode(errors="ignore")
+            pids = set()
+            for line in output.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[-1].isdigit():
+                    pids.add(parts[-1])
+            if pids:
+                print(f"  ⚠️ Port {port} is in use by PIDs: {', '.join(pids)}. Attempting to terminate...")
+                for pid in pids:
+                    subprocess.run(f"taskkill /PID {pid} /F /T", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"  ✅ Freed port {port}.")
+            else:
+                print(f"  ✅ Port {port} is free.")
+        else:
+            # Linux/macOS
+            cmd_find = ["lsof", "-t", f"-i:{port}"]
+            output = subprocess.check_output(cmd_find).decode().strip()
+            if output:
+                pids = output.splitlines()
+                print(f"  ⚠️ Port {port} is in use by PIDs: {', '.join(pids)}. Attempting to terminate...")
+                for pid in pids:
+                    subprocess.run(["kill", "-9", pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"  ✅ Freed port {port}.")
+            else:
+                print(f"  ✅ Port {port} is free.")
+    except subprocess.CalledProcessError:
+        print(f"  ✅ Port {port} appears free.")
+    except Exception as e:
+        print(f"  ⚠️ Could not verify or free port {port}: {e}")
+
+
+def clean_up_deployments(core_v1_api: client.CoreV1Api, apps_v1_api: client.AppsV1Api):
+    """
+    Deletes all existing Deployments, Services, and Pods in the target namespace
+    that match the dynamically set DEPLOYMENT_NAME label. This ensures a clean
+    slate for each run, crucial for CI environments.
+
+    Feature: Robust, CI-friendly cleanup using label selectors. Prevents resource
+             conflicts between concurrent runs.
+    """
+    if not core_v1_api or not apps_v1_api:
+         print("❌ CRITICAL: Kubernetes clients not provided for cleanup.")
+         sys.exit(1)
+
+    print(f"\n--- 2. Cleaning up old Deployments, Services & Pods in '{NAMESPACE}' ---")
+
+    # Define the label selector based on the dynamic deployment name
+    label_selector = f"app={DEPLOYMENT_NAME}"
+    cleanup_successful = True
+
+    for resource_type, delete_func in CLEANUP_RESOURCES:
+        try:
+            print(f"  -> Deleting {resource_type} matching label '{label_selector}'...")
+            # delete_func receives core_v1 or apps_v1 based on resource type
+            api = apps_v1_api if resource_type == "Deployments" else core_v1_api
+            delete_func(api, label_selector)
+        except ApiException as e:
+            # Ignore 404 Not Found errors, as resources might not exist
+            if e.status != 404:
+                print(f"  ⚠️ Warning during {resource_type} cleanup: {e.status} {e.reason}")
+                cleanup_successful = False
+        except Exception as e:
+            print(f"  ❌ Unexpected error during {resource_type} cleanup: {e}")
+            cleanup_successful = False
+
+    if cleanup_successful:
+        print("  -> Waiting briefly for resources to terminate...")
+        time.sleep(5)
+        print("✅ Clean-up completed.")
+    else:
+        print("⚠️ Clean-up finished with warnings.")
+
+
+def find_available_gpu_resource_key(core_v1_api: client.CoreV1Api) -> Optional[str]:
+    """
+    Scans Kubernetes nodes for advertised GPU resources matching GPU_RESOURCE_KEYS.
+    Returns the first matching key found, or None if no suitable GPU is available.
+    Respects REQUIRE_GPU and STRICT_GPU environment variables.
+
+    Feature: Automated GPU detection for intelligent workload scheduling.
+    """
+    print("\n--- 3. Detecting Available GPU Resources on Nodes ---")
+    try:
+        if not REQUIRE_GPU:
+            print("  -> REQUIRE_GPU is false. Skipping GPU detection, defaulting to CPU.")
             return None
 
-        # Check nodes against preferred keys
-        for key in GPU_PREFERRED_KEYS:
-            print(f"  -> Checking for resource key: {key}")
+        nodes = core_v1_api.list_node().items
+        for key in GPU_RESOURCE_KEYS:
+            print(f"  -> Checking for GPU key: {key}")
             for node in nodes:
-                # Extended resources are found in node.status.capacity
-                if key in node.status.capacity:
-                    print(f"  ✅ Detected preferred GPU resource key '{key}' on node '{node.metadata.name}'.")
+                # Check if the node has the capacity and allocatable amount for the GPU key
+                if (key in node.status.capacity and int(node.status.capacity[key]) > 0 and
+                    key in node.status.allocatable and int(node.status.allocatable[key]) > 0):
+                    print(f"  ✅ Found available GPU '{key}' on node '{node.metadata.name}'")
                     return key
 
-        print("  ❌ No preferred GPU resource key was detected on any node.")
-        return None
+        # If loop completes without finding a GPU
+        print("  ❌ No specified GPU resources found or available on any node.")
+        if STRICT_GPU:
+            print("  -> STRICT_GPU is true. Failing deployment.")
+            sys.exit(1)
+        else:
+            print("  -> STRICT_GPU is false. Falling back to CPU.")
+            return None
 
     except ApiException as e:
-        print(f"❌ Error communicating with Kubernetes API during node scan: {e}")
-        return None
+        print(f"❌ Error communicating with Kubernetes API during GPU detection: {e.status} {e.reason}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Unexpected error during GPU detection: {e}")
+        sys.exit(1)
 
 
-def create_gpu_deployment(
-    apps_v1: client.AppsV1Api, image_name: str, used_resource_key: Optional[str]
-) -> Tuple[str, str]:
+def create_gpu_deployment(apps_v1_api: client.AppsV1Api, image_name: str, gpu_key: Optional[str]):
     """
-    --- 3. Configuring and Creating Deployment ---
-    Creates a Kubernetes Deployment tailored for either GPU or CPU using the
-    pre-detected resource key.
+    Creates the Kubernetes Deployment object. If a gpu_key is provided, it adds
+    the corresponding resource limit to the container spec. Otherwise, it uses
+    default CPU/Memory limits. Applies standard labels for cleanup.
+
+    Feature: Creates the primary application workload (Allure report server)
+             with appropriate resource requests (GPU or CPU).
     """
-    print("\n--- 3. Configuring and Creating Deployment ---")
-    
-    # --- Determine the deployment type and resource limits ---
-    if used_resource_key:
-        deployment_type = "GPU"
-        # The request/limit value for most extended resources is 1
-        resource_limits = {used_resource_key: "1"}
-        status_message = "Deploying GPU workload"
-        key_status = f"Using extended resource key: {used_resource_key}"
-        
-        print(f"  -> {COLOR_YELLOW}MODE: GPU Acceleration Enabled{COLOR_RESET}")
-        print(f"  -> Resource Request/Limits (GPU): {resource_limits}")
-        
-    elif REQUIRE_GPU and STRICT_GPU:
-        print("  ❌ FATAL: REQUIRE_GPU and STRICT_GPU are true, but no GPU found.")
-        raise SystemExit("Deployment failed: Required GPU resource not available.")
+    print("\n--- 4. Creating Deployment ---")
+
+    limits: Dict[str, str] = {}
+    mode = "CPU"
+    if gpu_key:
+        limits = {gpu_key: "1"}
+        mode = "GPU"
+        print(f"  -> Configuring deployment for GPU mode with limit: {limits}")
+    elif STRICT_GPU:
+        print("❌ CRITICAL: STRICT_GPU=true but no GPU key provided. Exiting.")
+        sys.exit(1)
     else:
-        deployment_type = "CPU"
-        # Standard CPU/memory limits for CPU-only fallback
-        resource_limits = {"cpu": "1", "memory": "1Gi"} 
-        status_message = "Deploying CPU-only workload"
-        key_status = "No GPU key found. Defaulting to CPU-only limits (1 core / 1Gi memory)."
-        
-        print(f"  -> {COLOR_YELLOW}MODE: CPU Fallback Activated{COLOR_RESET}")
-        print(f"  -> Resource Request/Limits (CPU): {resource_limits}")
+        limits = {"cpu": "500m", "memory": "512Mi"}
+        mode = "CPU"
+        print(f"  -> Configuring deployment for CPU mode with limits: {limits}")
 
-    # Explicitly print the image and deployment name
-    print(f"  -> Selected Docker Image: {image_name}")
-    print(f"  -> Target Deployment Name: {DEPLOYMENT_NAME}")
-
-    # --- Deployment Definition ---
+    # Define specs
     container = client.V1Container(
-        name="allure-report-server",
+        name=f"{DEPLOYMENT_NAME}-container",
         image=image_name,
-        ports=[client.V1ContainerPort(container_port=80)],
-        resources=client.V1ResourceRequirements(
-            limits=resource_limits
-        ),
-        # This policy ensures K8s checks the registry, which is good
-        # practice even with immutable tags.
-        image_pull_policy="Always",
+        ports=[client.V1ContainerPort(container_port=CONTAINER_APP_PORT)],
+        resources=client.V1ResourceRequirements(limits=limits, requests=limits),
+        image_pull_policy="IfNotPresent"
     )
-
     template = client.V1PodTemplateSpec(
         metadata=client.V1ObjectMeta(labels={"app": DEPLOYMENT_NAME}),
-        spec=client.V1PodSpec(containers=[container]),
+        spec=client.V1PodSpec(containers=[container])
     )
-
+    selector = client.V1LabelSelector(
+        match_labels={"app": DEPLOYMENT_NAME}
+    )
     spec = client.V1DeploymentSpec(
         replicas=1,
-        selector=client.V1LabelSelector(match_labels={"app": DEPLOYMENT_NAME}),
         template=template,
+        selector=selector
     )
-
     deployment = client.V1Deployment(
         api_version="apps/v1",
         kind="Deployment",
-        metadata=client.V1ObjectMeta(name=DEPLOYMENT_NAME),
-        spec=spec,
+        metadata=client.V1ObjectMeta(
+            name=DEPLOYMENT_NAME,
+            labels={"app": DEPLOYMENT_NAME}
+        ),
+        spec=spec
     )
 
-    # --- Create/Update Deployment ---
+    # Create or replace
     try:
-        apps_v1.read_namespaced_deployment(name=DEPLOYMENT_NAME, namespace=NAMESPACE)
-        print(f"  ℹ️ Deployment '{DEPLOYMENT_NAME}' already exists. Updating...")
-        apps_v1.replace_namespaced_deployment(
-            name=DEPLOYMENT_NAME, namespace=NAMESPACE, body=deployment
-        )
-        print(f"  ✅ Deployment '{DEPLOYMENT_NAME}' updated successfully.")
+        apps_v1_api.create_namespaced_deployment(namespace=NAMESPACE, body=deployment)
+        print(f"✅ Deployment '{DEPLOYMENT_NAME}' created successfully. Mode: {mode}")
     except ApiException as e:
-        if e.status == 404:
-            print(f"  ℹ️ Deployment '{DEPLOYMENT_NAME}' not found. Creating new...")
-            apps_v1.create_namespaced_deployment(namespace=NAMESPACE, body=deployment)
-            print(f"  ✅ Deployment '{DEPLOYMENT_NAME}' created successfully.")
+        if e.status == 409: # Resource already exists
+            print(f"  ℹ️ Deployment '{DEPLOYMENT_NAME}' already exists. Attempting to replace...")
+            try:
+                apps_v1_api.replace_namespaced_deployment(name=DEPLOYMENT_NAME, namespace=NAMESPACE, body=deployment)
+                print(f"  ✅ Deployment '{DEPLOYMENT_NAME}' replaced successfully. Mode: {mode}")
+            except ApiException as replace_e:
+                print(f"  ❌ Failed to replace existing Deployment: {replace_e.status} {replace_e.reason}")
+                sys.exit(1)
         else:
-            print(f"❌ Error creating/updating deployment: {e}")
-            raise
+            print(f"❌ Failed to create Deployment: {e.status} {e.reason}")
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ Unexpected error creating Deployment: {e}")
+        sys.exit(1)
 
-    return status_message, key_status
 
-
-def create_cluster_ip_service(core_v1: client.CoreV1Api):
+def create_cluster_ip_service(core_v1_api: client.CoreV1Api):
     """
-    --- 4. Creating ClusterIP Service ---
-    Creates a Kubernetes ClusterIP Service to expose the Deployment.
+    Creates a Kubernetes ClusterIP Service to expose the Deployment's pods internally
+    within the cluster on K8S_SERVICE_PORT, targeting the CONTAINER_APP_PORT.
+    Applies standard labels for cleanup.
+
+    Feature: Provides a stable internal network endpoint for the application pods,
+             necessary for port-forwarding.
     """
-    print("\n--- 4. Creating ClusterIP Service ---")
-    service_body = client.V1Service(
+    print("\n--- 5. Creating ClusterIP Service ---")
+
+    service = client.V1Service(
         api_version="v1",
         kind="Service",
-        metadata=client.V1ObjectMeta(name=SERVICE_NAME),
+        metadata=client.V1ObjectMeta(
+            name=SERVICE_NAME,
+            labels={"app": DEPLOYMENT_NAME}
+        ),
         spec=client.V1ServiceSpec(
             selector={"app": DEPLOYMENT_NAME},
-            ports=[
-                client.V1ServicePort(
-                    protocol="TCP",
-                    port=LOCAL_PORT,    # Service's port (8080)
-                    target_port=80,     # Container's port (80)
-                )
-            ],
-            type="ClusterIP",
-        ),
+            ports=[client.V1ServicePort(
+                protocol="TCP",
+                port=K8S_SERVICE_PORT,
+                target_port=CONTAINER_APP_PORT
+            )],
+            type="ClusterIP"
+        )
     )
 
     try:
-        core_v1.read_namespaced_service(name=SERVICE_NAME, namespace=NAMESPACE)
-        print(f"  ℹ️ Service '{SERVICE_NAME}' already exists. Updating...")
-        core_v1.replace_namespaced_service(
-            name=SERVICE_NAME, namespace=NAMESPACE, body=service_body
-        )
-        print(f"  ✅ Service '{SERVICE_NAME}' updated successfully.")
+        core_v1_api.create_namespaced_service(namespace=NAMESPACE, body=service)
+        print(f"✅ Service '{SERVICE_NAME}' created successfully.")
     except ApiException as e:
-        if e.status == 404:
-            print(f"  ℹ️ Service '{SERVICE_NAME}' not found. Creating new...")
-            core_v1.create_namespaced_service(namespace=NAMESPACE, body=service_body)
-            print(f"  ✅ Service '{SERVICE_NAME}' created successfully.")
+        if e.status == 409:
+            print(f"  ℹ️ Service '{SERVICE_NAME}' already exists. Attempting to replace...")
+            try:
+                core_v1_api.replace_namespaced_service(name=SERVICE_NAME, namespace=NAMESPACE, body=service)
+                print(f"  ✅ Service '{SERVICE_NAME}' replaced successfully.")
+            except ApiException as replace_e:
+                print(f"  ❌ Failed to replace existing Service: {replace_e.status} {replace_e.reason}")
+                sys.exit(1)
         else:
-            print(f"❌ Error creating/updating service: {e}")
-            raise
+            print(f"❌ Failed to create Service: {e.status} {e.reason}")
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ Unexpected error creating Service: {e}")
+        sys.exit(1)
 
 
-def wait_for_pod_running(core_v1: client.CoreV1Api, timeout_sec: int) -> Optional[str]:
+def wait_for_pod_running(core_v1_api: client.CoreV1Api, timeout_sec: int = 180) -> Optional[str]:
     """
-    --- 5. Waiting for Pod Readiness ---
-    Waits for the Pod created by the Deployment to enter the Running phase.
+    Waits for a pod managed by the Deployment (matching DEPLOYMENT_NAME label)
+    to enter the 'Running' and 'Ready' state. Returns the name of the running
+    pod or None if timeout occurs or pod fails.
+
+    Feature: Ensures the application container is up and running before proceeding
+             (e.g., before starting port-forward). Detects immediate pod failures.
     """
-    print(f"\n--- 5. Waiting for Pod Readiness (Timeout: {timeout_sec}s) ---")
-    start_time = time.time()
-    last_phase = ""
-    last_event_time = 0
-    pod_name = None
-    
-    # Helper function to print new events (e.g., 'Scheduled', 'Pulling image')
-    def print_new_events():
-        nonlocal last_event_time
+    print(f"\n--- 6. Waiting up to {timeout_sec}s for Pod '{DEPLOYMENT_NAME}' to be Running & Ready ---")
+    start = time.time()
+    last_status_msg = ""
+
+    while time.time() - start < timeout_sec:
         try:
-            if not pod_name:
-                return
-                
-            events = core_v1.list_namespaced_event(
-                namespace=NAMESPACE, 
-                field_selector=f'involvedObject.name={pod_name}',
-                limit=10 
-            ).items
-            
-            new_events = sorted([
-                e for e in events if e.last_timestamp and e.last_timestamp.timestamp() > last_event_time
-            ], key=lambda x: x.last_timestamp)
-            
-            for event in new_events:
-                ts = event.last_timestamp.strftime("%H:%M:%S") if event.last_timestamp else "N/A"
-                print(f"  [{ts} | EVENT] {event.type} ({event.reason}): {event.message}")
-                last_event_time = event.last_timestamp.timestamp() if event.last_timestamp else last_event_time
-
-        except ApiException as e:
-            if e.status != 404:
-                print(f"  ⚠️ Warning: Failed to retrieve events: {e}")
-        except Exception:
-            pass
-
-
-    while time.time() - start_time < timeout_sec:
-        try:
-            # Find the Pod associated with the Deployment label selector
-            pods = core_v1.list_namespaced_pod(
+            pods = core_v1_api.list_namespaced_pod(
                 namespace=NAMESPACE, label_selector=f"app={DEPLOYMENT_NAME}"
             ).items
 
-            if not pods:
-                print("  ℹ️ Waiting for Pod to be created by Deployment...", end='\r')
-                time.sleep(2)
-                continue
+            live_pod = next((p for p in pods if p.status.phase not in ["Succeeded", "Failed", "Unknown"]), None)
 
-            pod = pods[0]
-            
-            # Explicitly report the selected pod name when found
-            if pod_name is None:
-                pod_name = pod.metadata.name
-                print(f"\n  ℹ️ Deployment Pod created: {pod_name}")
+            if live_pod:
+                pod_name = live_pod.metadata.name
+                phase = live_pod.status.phase
 
-            current_phase = pod.status.phase
+                # Check container statuses for readiness and image pull errors
+                is_ready = False
+                if live_pod.status.container_statuses:
+                    is_ready = all(c.ready for c in live_pod.status.container_statuses)
+                    
+                    for cs in live_pod.status.container_statuses:
+                         if cs.state and cs.state.waiting and "ImagePullBackOff" in cs.state.waiting.reason:
+                             print(f"❌ Pod '{pod_name}' is stuck in ImagePullBackOff. Check image tag/registry access.")
+                             return None # Pod failed due to image issue
 
-            if current_phase != last_phase:
-                print(f"\n  [STATUS] Pod '{pod_name}' Phase changed to: {current_phase}")
-                last_phase = current_phase
-                time.sleep(1) 
-
-            if current_phase == "Running":
-                # Check for container readiness
-                if pod.status.container_statuses and all(c.ready for c in pod.status.container_statuses):
-                    print(f"\n  ✅ Pod '{pod_name}' is Running and Ready!")
+                # Success condition
+                if phase == "Running" and is_ready:
+                    print(f"✅ Pod '{pod_name}' is Running & Ready.")
                     return pod_name
-                else:
-                    print(f"  [STATUS] Pod '{pod_name}' Running, but containers not yet Ready. ({int(time.time() - start_time)}s)", end='\r')
+                
+                current_status_msg = f"Pod '{pod_name}' is {phase}. Ready={is_ready}."
+                if current_status_msg != last_status_msg:
+                    print(f"  -> {current_status_msg} Waiting...")
+                    last_status_msg = current_status_msg
 
-            elif current_phase in ["Pending", "ContainerCreating"]:
-                print(f"  [STATUS] Pod '{pod_name}' in {current_phase}. Waiting for scheduler/image pull... ({int(time.time() - start_time)}s)", end='\r')
-                print_new_events()
-
-            elif current_phase in ["Failed", "Error", "Unknown"]:
-                print(f"\n  ❌ Pod '{pod_name}' failed with status: {current_phase}")
-                print(f"  Last Pod Events:")
-                print_new_events()
-                return None 
+            elif pods:
+                # If pods exist but all are in terminal states (Failed/Succeeded)
+                terminal_pod = pods[0]
+                print(f"❌ Pod '{terminal_pod.metadata.name}' exited or failed immediately (status={terminal_pod.status.phase}). Cannot proceed.")
+                return None
 
         except ApiException as e:
-            print(f"\n❌ Error during pod status check: {e}")
-            return None
+            print(f"  -> Warning: K8s API error while checking pod status: {e.status}. Retrying...")
+        except Exception as e:
+            print(f"  -> Warning: Unexpected error checking pod status: {e}. Retrying...")
 
         time.sleep(5)
 
-    print(f"\n❌ Timeout reached ({timeout_sec}s). Pod did not reach 'Running' status.")
+    print(f"❌ Timeout waiting for pod '{DEPLOYMENT_NAME}' to become Running & Ready.")
     return None
 
-# NEW HELPER FUNCTION to open the browser
+
 def _open_browser_nonblocking(url: str):
-    """Wait briefly for port-forward to establish, then open URL."""
-    # Give kubectl a moment to bind the port before the browser tries to connect
-    time.sleep(2) 
-    print(f"\n🚀 Attempting to open report in browser: {url}")
-    webbrowser.open_new_tab(url)
+    """
+    Helper function to open a URL in a new browser tab in a separate thread
+    after a short delay, preventing it from blocking the main script execution.
+
+    Feature: Improves user experience by automatically opening the report URL.
+    """
+    try:
+        time.sleep(2)
+        print(f"   -> Opening browser to: {url}")
+        webbrowser.open_new_tab(url)
+    except Exception as e:
+        print(f"   -> Warning: Could not automatically open browser: {e}")
+
 
 def start_port_forward(local_port: int):
     """
-    --- 6. Starting Kubectl Port-Forward ---
-    Starts a blocking kubectl port-forward command to access the report service.
-    Now includes a call to automatically open the report in the browser.
+    Starts the `kubectl port-forward` command in a separate background process.
+    Manages the process reference globally for later termination. Opens the browser.
+
+    Feature: Provides local access to the service running inside Kubernetes via localhost.
+             Handles process management for reliable start/stop.
     """
-    print("\n--- 6. Starting Kubectl Port-Forward ---")
-    
-    # Command: kubectl port-forward service/<service-name> <local-port>:<service-port>
-    # The service port is LOCAL_PORT (8080) which maps to targetPort 80.
-    cmd: List[str] = [
-        "kubectl", 
-        "port-forward", 
-        f"service/{SERVICE_NAME}",
-        f"{local_port}:{LOCAL_PORT}",
-        "-n", NAMESPACE,
-    ]
-    
+    global PORT_FORWARD_PROCESS
     url = f"http://127.0.0.1:{local_port}"
-    print(f"Executing command: {' '.join(cmd)}")
-    print(f"Access the Allure report at: {COLOR_BLUE}{url}{COLOR_RESET}")
-    print("\n*** This command is BLOCKING. Press \033[1;31mCtrl+C\033[0m to stop forwarding and exit. ***")
+    print(f"\n--- 7. Starting Port Forwarding to {url} ---")
+
+    # 🔧 Ensure the port is free before attempting port-forward
+    _free_local_port(local_port)
     
-    # --- AUTOMATIC BROWSER OPEN FIX ---
-    # Start the browser opening in a new thread immediately
-    browser_thread = threading.Thread(target=_open_browser_nonblocking, args=(url,))
-    browser_thread.daemon = True # Set as daemon so it won't prevent script exit
-    browser_thread.start()
-    # ----------------------------------
+    cmd = ["kubectl", "port-forward", f"service/{SERVICE_NAME}", f"{local_port}:{K8S_SERVICE_PORT}", "-n", NAMESPACE]
 
     try:
-        # Run the blocking command
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError:
-        print("\nERROR: 'kubectl' not found in PATH. Please ensure kubectl is installed.")
-    except subprocess.CalledProcessError as e:
-        # Don't print the full error if it's just a user Ctrl+C
-        if e.returncode != 1:
-            print(f"\nERROR during port-forwarding: {e}")
-    except KeyboardInterrupt:
-        print(f"\nPort forwarding stopped by user (\033[1;31mCtrl+C{COLOR_RESET}). Exiting.")
-    except Exception as e:
-        print(f"\nAn unexpected error occurred: {e}")
-
-
-if __name__ == '__main__':
-    print("==============================================================================")
-    print("      STARTING KUBERNETES GPU BENCHMARK DEPLOYMENT WORKFLOW                   ")
-    print("        Author: Bang Thien Nguyen - ontario1998@gmail.com                     ")
-    print("==============================================================================")
-    
-    # --- START: ARGUMENT PARSING AND IMMUTABLE TAG FIX ---
-    if len(sys.argv) < 2:
-        print("\n❌ FATAL: Missing <BUILD_NUMBER> argument.")
-        print("Usage: python deploy_gpu_workflow.py <BUILD_NUMBER>")
-        print("Example: python deploy_gpu_workflow.py 1")
-        print("This build number is used to pull the specific, immutable image tag.")
-        sys.exit(1)
+        print(f"  -> Executing: {' '.join(cmd)}")
         
-    BUILD_NUMBER = sys.argv[1]
-    if not BUILD_NUMBER.isdigit():
-        print(f"\n❌ FATAL: BUILD_NUMBER must be an integer. Got: '{BUILD_NUMBER}'")
-        sys.exit(1)
-    
-    # This is the crucial fix:
-    # We override the global IMAGE_NAME to use the specific, immutable build number
-    # tag instead of the mutable ':latest' tag. This defeats all caching issues.
-    IMAGE_NAME = f"{DOCKER_USER}/gpu-benchmark-report:{BUILD_NUMBER}"
-    print(f"\n🎯 Targeting immutable image tag: {IMAGE_NAME}")
-    # --- END: ARGUMENT PARSING AND IMMUTABLE TAG FIX ---
+        # Use common process creation flags for better cross-platform termination
+        process_flags = {}
+        if os.name == 'posix':
+             process_flags['preexec_fn'] = os.setsid
+        else:
+             process_flags['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-    pod_name_to_highlight = None
+        PORT_FORWARD_PROCESS = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **process_flags)
+
+        time.sleep(2)
+
+        if PORT_FORWARD_PROCESS.poll() is not None:
+             stderr_output = PORT_FORWARD_PROCESS.stderr.read().decode()
+             print(f"❌ Port-forward failed to start. Error: {stderr_output.strip()}")
+             PORT_FORWARD_PROCESS = None
+             return
+
+        print(f"  -> Port-forward process started (PID: {PORT_FORWARD_PROCESS.pid}).")
+
+        thread = threading.Thread(target=_open_browser_nonblocking, args=(url,))
+        thread.daemon = True
+        thread.start()
+
+    except FileNotFoundError:
+        print("❌ 'kubectl' command not found. Cannot start port-forwarding.")
+        PORT_FORWARD_PROCESS = None
+    except Exception as e:
+        print(f"❌ Failed to start port-forward process: {e}")
+        PORT_FORWARD_PROCESS = None
+
+def stop_port_forward():
+    """
+    Gracefully terminates the background `kubectl port-forward` process if it's running.
+
+    Feature: Ensures network resources are released cleanly upon script exit or interruption.
+    """
+    global PORT_FORWARD_PROCESS
+    if PORT_FORWARD_PROCESS and PORT_FORWARD_PROCESS.poll() is None:
+        print("\n--- Stopping Port Forwarding ---")
+        try:
+            pid = PORT_FORWARD_PROCESS.pid
+            print(f"  -> Terminating port-forward process (PID: {pid})...")
+            
+            if os.name == 'posix':
+                # Kill the entire process group
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            else:
+                # Terminate on Windows (taskkill /T kills process tree)
+                subprocess.run(f"taskkill /F /PID {pid} /T", check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            PORT_FORWARD_PROCESS.wait(timeout=5)
+            print("  ✅ Port-forward process terminated.")
+
+        except ProcessLookupError:
+            print("  -> Port-forward process already terminated.")
+        except subprocess.TimeoutExpired:
+             print("  ⚠️ Warning: Timeout waiting for port-forward process to terminate.")
+        except Exception as e:
+            print(f"  ⚠️ Error stopping port-forward process: {e}")
+        finally:
+            PORT_FORWARD_PROCESS = None
+
+
+def docker_cleanup():
+    """
+    Performs a safe Docker cleanup: removes stopped containers, unused networks,
+    build cache, but preserves tagged local development images (like *-local).
+
+    Feature: Helps manage disk space on the execution host (local or CI runner)
+             without accidentally removing essential base or development images.
+    """
+    print("\n--- 8. Running Docker Cleanup (Safe Prune) ---")
     
+    try:
+        # 1. System Prune (Containers, Networks, Dangling Images/Volumes)
+        print("  -> Running safe system prune...")
+        subprocess.run(["docker", "system", "prune", "--force", "--volumes"],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # 2. Prune Docker Build Cache
+        print("  -> Clearing Docker build cache.")
+        # Suppress output to keep console clean unless error occurs
+        try:
+            subprocess.run(["docker", "builder", "prune", "--all", "--force"],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError as e:
+             if "docker builder" not in e.stderr: # Ignore if builder command is missing (old docker)
+                 print(f"  -> Warning during build cache prune: {e.stderr.strip()}")
+        
+        print("✅ Docker cleanup finished. Tagged local images should be preserved.")
+
+    except FileNotFoundError:
+        print("❌ Docker command not found. Skipping cleanup.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error during Docker prune: {e.stderr.strip()}")
+    except Exception as e:
+        print(f"❌ An unexpected error occurred during Docker cleanup: {e}")
+
+
+# ------------------ MAIN WORKFLOW & ENTRY POINT ------------------
+
+def main_workflow():
+    """
+    Handles argument parsing, dynamic configuration, and orchestrates the
+    entire deployment lifecycle.
+    """
+    global DEPLOYMENT_NAME, SERVICE_NAME, LOCAL_PORT, IMAGE_NAME
+
+    # Argument parsing (simplified)
+    if len(sys.argv) < 2 or (len(sys.argv) < 3 and sys.argv[1] != "cleanup-only"):
+        print("\nUsage:")
+        print("  python deploy_gpu_workflow.py <BUILD_NUMBER> <FRAMEWORK_NAME>")
+        print("  python deploy_gpu_workflow.py cleanup-only")
+        print("\nExample:")
+        print("  python deploy_gpu_workflow.py 1 gpu-benchmark")
+        print("  python deploy_gpu_workflow.py 1 robotics_bdd")        
+        sys.exit(1)
+
+    cleanup_mode = (len(sys.argv) == 2 and sys.argv[1] == "cleanup-only")
+
+    if not cleanup_mode:
+        BUILD_NUMBER = sys.argv[1]
+        FRAMEWORK_ARG = sys.argv[2].lower()
+
+        if not BUILD_NUMBER.isdigit():
+            print("❌ BUILD_NUMBER must be an integer.")
+            sys.exit(1)
+
+        # Standardize framework name
+        FRAMEWORK_NAME_NORM = FRAMEWORK_ARG.replace("_", "-")
+
+        # Dynamic Port Assignment
+        port_map = {"robotics-bdd": 8081, "gpu-benchmark": 8082}
+        LOCAL_PORT = port_map.get(FRAMEWORK_NAME_NORM, 8080)
+        if LOCAL_PORT == 8080:
+             print(f"⚠️ Warning: Unknown framework '{FRAMEWORK_ARG}'. Defaulting local port to 8080.")
+
+        # Set Global Dynamic Names
+        DEPLOYMENT_NAME = f"{FRAMEWORK_NAME_NORM}-deployment"
+        SERVICE_NAME = f"{FRAMEWORK_NAME_NORM}-service"
+        IMAGE_NAME = f"{DOCKER_USER}/{FRAMEWORK_NAME_NORM}-report:{BUILD_NUMBER}"
+
+        print("\n====================================================================")
+        print("🚀 STARTING KUBERNETES DEPLOYMENT WORKFLOW")
+        print("====================================================================")
+        print(f"🎯 Target Image: {IMAGE_NAME}")
+        print(f"🛠️ Deployment/Service Base: {FRAMEWORK_NAME_NORM}")
+        print(f"🌐 Local Port: {LOCAL_PORT}")
+    else:
+        DEPLOYMENT_NAME = "cleanup"
+        SERVICE_NAME = "cleanup"
+        print("\n====================================================================")
+        print("🚀 RUNNING KUBERNETES CLEANUP ONLY")
+        print("====================================================================")
+
+
+    # --- Execute Workflow ---
     try:
         load_kube_config()
-        # Initialize Kubernetes API clients
-        apps_v1 = client.AppsV1Api()
-        core_v1 = client.CoreV1Api()
-        
-        # New Step: Clean up existing deployments before starting
-        clean_up_deployments()
 
-        # Print current pod status before we begin deployment
-        print_available_pods(core_v1, "Pods Before Deployment Workflow")
-
-        # STEP 2: Detect available GPU resources
-        used_resource_key = find_available_gpu_resource_key(core_v1)
-        
-        # STEP 3: Create/Update Deployment
-        # The script now passes the new, immutable IMAGE_NAME to this function.
-        status, key_status = create_gpu_deployment(apps_v1, IMAGE_NAME, used_resource_key)
-        print(f"\n[STATUS SUMMARY] Deployment created/updated. Mode: {status}. Resource Key Status: {key_status}")
-
-        # STEP 4: Create/Update Service
-        create_cluster_ip_service(core_v1)
-        print("\n[STATUS SUMMARY] Service is ready for port-forwarding.")
-
-        # STEP 5: Wait for Pod to be Running
-        pod_name_to_highlight = wait_for_pod_running(core_v1, timeout_sec=180) 
-        
-        # Print pod status after the deployment attempt has finished, highlighting the new pod
-        print_available_pods(core_v1, "Pods After Deployment Workflow", highlight_pod_name=pod_name_to_highlight)
-
-        # STEP 6: Start Port-Forwarding
-        if pod_name_to_highlight:
-            # FIX: Call start_port_forward without pod_name.
-            # It now targets the stable service and automatically opens the browser.
-            start_port_forward(LOCAL_PORT)
+        if cleanup_mode:
+            clean_up_deployments(core_v1, apps_v1)
         else:
-            print("\nWorkflow completed, but the Pod failed to start. Cannot start port-forwarding.")
+            # Full Deployment Workflow
+            clean_up_deployments(core_v1, apps_v1)
+            print_available_pods(core_v1, "Pods Before Deployment")
+
+            gpu_key = find_available_gpu_resource_key(core_v1)
+            create_gpu_deployment(apps_v1, IMAGE_NAME, gpu_key)
+            create_cluster_ip_service(core_v1)
+
+            pod_name = wait_for_pod_running(core_v1, 180)
+
+            if pod_name:
+                print_available_pods(core_v1, "Pods After Deployment", pod_name)
+                start_port_forward(LOCAL_PORT)
+
+                # Keep script alive while port-forward runs (for local execution)
+                if os.getenv("CI", "false").lower() != "true":
+                    print("\n" + "="*60)
+                    print(f"   Deployment active. Access report at http://localhost:{LOCAL_PORT}")
+                    print("   Press Ctrl+C to stop port-forwarding and clean up resources.")
+                    print("="*60)
+                    while PORT_FORWARD_PROCESS and PORT_FORWARD_PROCESS.poll() is None:
+                        time.sleep(1)
+                else:
+                    print("\n   CI environment detected. Port-forward running in background.")
+            else:
+                print("❌ Pod failed to start or become ready. Skipping port-forwarding.")
+                sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\n\n" + "="*60)
+        print(f"{COLOR_YELLOW} 🛑 WORKFLOW MANUALLY INTERRUPTED (Ctrl+C). Cleaning up...{COLOR_RESET}")
+        print("="*60)
+        # Final cleanup in 'finally' block will handle the rest.
+
+    except ApiException as e:
+         print(f"\n❌ FATAL KUBERNETES API ERROR: {e.status} {e.reason}")
+         if e.body:
+             print(f"   Body: {e.body}")
 
     except Exception as e:
-        print(f"\n--- FATAL WORKFLOW ERROR ---")
-        print(f"An error prevented the deployment workflow from completing: {e}")
-        sys.exit(1)
+        print(f"\n❌ UNEXPECTED CRITICAL ERROR during workflow: {e}")
+
     finally:
-        print("\n==============================================================================")
-        print("WORKFLOW COMPLETED. (The port-forwarding window has closed.)")
-        print("==============================================================================")
+        # --- GUARANTEED CLEANUP ---
+        print("\n--- Final Cleanup Phase ---")
+        stop_port_forward()
+        if core_v1 and apps_v1 and DEPLOYMENT_NAME:
+             # Only cleanup K8s resources if clients and dynamic names are set
+             clean_up_deployments(core_v1, apps_v1)
+        docker_cleanup()
+
+        print("\n====================================================================")
+        print("WORKFLOW COMPLETED")
+        print("====================================================================")
+
+if __name__ == "__main__":
+    main_workflow()
