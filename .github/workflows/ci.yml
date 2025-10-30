@@ -165,7 +165,7 @@ jobs:
       - name: Download Previous Allure History Artifact
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: gpu-benchmarks.yml
+          workflow: ci.yml
           branch: main
           name: allure-history
           path: ${{ env.SITE_DIR }}
@@ -219,3 +219,163 @@ jobs:
           done
 
       # (keep the dashboard + upload + deploy steps unchanged)
+      - name: Finalize Reports and Build Index Page
+        shell: bash
+        run: |
+          SITE_DIR="${{ env.SITE_DIR }}"
+          # Fix: Replace absolute paths with relative paths
+          find "$SITE_DIR" -type f \( -path "*/latest/*" -o -path "*/${{ github.run_number }}/*" \) -name 'index.html' | while read FILE_PATH; do
+            sed -i 's|src="/|src="./|g; s|href="/|href="./|g' "$FILE_PATH"
+          done
+          
+          # --- Rebuild index.html logic ---
+          CURRENT_LA_TIME=$(TZ='America/Los_Angeles' date)
+          
+          echo "<html><head><title>Allure Reports History</title>
+          <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+          <style>
+          body{font-family:sans-serif;margin:20px;}
+          ul{list-style:none;padding:0;}
+          li{margin:6px 0;}
+          a{text-decoration:none;color:#0366d6;}
+          a:hover{text-decoration:underline;}
+          #chart-container {
+            max-width: 600px;
+            max-height: 300px;
+            margin: 0;
+          }
+          </style></head><body>
+          <h1>🤖 GPU Benchmarks CI/CD Build History</h1>
+          <h2>🧩 Latest Allure Reports</h2><hr><ul>" > "$SITE_DIR/index.html"
+          
+          # Latest Reports List
+          for OS in ubuntu-latest windows-latest; do
+            if [ -d "$SITE_DIR/latest/$OS" ]; then
+              TS_UTC=$(cat "$SITE_DIR/latest/$OS/build-info.txt" 2>/dev/null || echo "")
+              TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "$TS_UTC")
+              echo "<li><strong><a href='latest/$OS/'>Latest Report ($OS)</a></strong> - Last run: $TS_DISPLAY</li>" >> "$SITE_DIR/index.html"
+            else
+              echo "<li><strong>$OS:</strong> (No report found for latest build)</li>" >> "$SITE_DIR/index.html"
+            fi
+          done
+
+          echo "</ul><hr><h2>📊 Report History & Trends (Times in PDT)</h2>" >> "$SITE_DIR/index.html"
+          
+          BUILDS=$(find "$SITE_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | grep -E '^[0-9]+$' | sort -nr)
+          CHART_BUILDS=$(echo "$BUILDS" | sort -n)
+          
+          LABELS=""
+          PASS_COUNTS=""
+          FAIL_COUNTS=""
+          UNSTABLE_COUNTS=""
+          
+          echo "<ul>" >> "$SITE_DIR/index.html"
+          # Generate the visible list of links (newest to oldest)
+          for BUILD in $BUILDS; do
+            TS_UTC=$(cat "$SITE_DIR/$BUILD/ubuntu-latest/build-info.txt" 2>/dev/null || echo "")
+            TS_DISPLAY=$(TZ='America/Los_Angeles' date -d "$TS_UTC" '+%a %b %d %H:%M:%S PDT %Y' 2>/dev/null || echo "N/A")
+
+            echo "<li><strong>Build #${BUILD}</strong> (Run: $TS_DISPLAY) - <a href='${BUILD}/ubuntu-latest/'>Ubuntu</a> / <a href='${BUILD}/windows-latest/'>Windows</a></li>" >> "$SITE_DIR/index.html"
+          done
+          echo "</ul>" >> "$SITE_DIR/index.html"
+          
+          # Gather data for the chart (oldest to newest)
+          for BUILD in $CHART_BUILDS; do
+            TOTAL_PASS=0
+            TOTAL_FAIL=0   
+            TOTAL_UNSTABLE=0 
+            
+            for OS in ubuntu-latest windows-latest; do
+              SUMMARY_FILE="$SITE_DIR/$BUILD/$OS/widgets/summary.json"
+              
+              if [ -f "$SUMMARY_FILE" ]; then
+                STATS=$(jq -r '[.statistic.passed // 0, .statistic.failed // 0, .statistic.broken // 0] | @tsv' "$SUMMARY_FILE" 2>/dev/null)
+                read -r PASS_COUNT FAIL_COUNT BROKEN_COUNT <<< "$STATS"
+
+                TOTAL_PASS=$((TOTAL_PASS + PASS_COUNT))
+                TOTAL_FAIL=$((TOTAL_FAIL + FAIL_COUNT))
+                TOTAL_UNSTABLE=$((TOTAL_UNSTABLE + BROKEN_COUNT))
+              fi
+            done
+            
+            LABELS="$LABELS'$BUILD',"
+            PASS_COUNTS="$PASS_COUNTS$TOTAL_PASS,"
+            FAIL_COUNTS="$FAIL_COUNTS$TOTAL_FAIL,"
+            UNSTABLE_COUNTS="$UNSTABLE_COUNTS$TOTAL_UNSTABLE,"
+          done
+          
+          # Inject Chart.js code
+          echo "<div id='chart-container'>
+          <canvas id='trendChart'></canvas>
+          </div>
+          <script>
+          const ctx = document.getElementById('trendChart').getContext('2d');
+          new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: [${LABELS%,}],
+              datasets: [
+                {label: 'PASS', data: [${PASS_COUNTS%,}], borderColor: 'green', fill: false},
+                {label: 'FAIL', data: [${FAIL_COUNTS%,}], borderColor: 'red', fill: false},
+                {label: 'UNSTABLE', data: [${UNSTABLE_COUNTS%,}], borderColor: 'orange', fill: false}
+              ]
+            },
+            options: { 
+              responsive: true, 
+              maintainAspectRatio: false, 
+              plugins: { legend: { position: 'top' } }, 
+              scales: { 
+                y: { 
+                  beginAtZero: true, 
+                  stepSize: 1,
+                  title: { display: true, text: 'Total Number of Tests' }
+                },
+                x: {
+                  title: { display: true, text: 'Build Number' }
+                }
+              } 
+            }
+          });
+          </script>
+          <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ env.SITE_DIR }}
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Upload Allure History Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-history
+          path: ${{ env.SITE_DIR }}
+          retention-days: 7
+
+      - name: Add Workflow Summary (Badges)
+        run: |
+          PAGE_URL=${{ steps.deployment.outputs.page_url }}
+          BASE_URL="${PAGE_URL%/}"
+          TEST_STATUS=${{ needs.test.outputs.test_outcome }}
+
+          if [[ "$TEST_STATUS" == "FAIL" ]]; then
+            STATUS_ICON="❌"
+            STATUS_TEXT="Failed (setup/config error)"
+          elif [[ "$TEST_STATUS" == "UNSTABLE" ]]; then
+            STATUS_ICON="⚠️"
+            STATUS_TEXT="Unstable (some tests failed)"
+          else
+            STATUS_ICON="✅"
+            STATUS_TEXT="All tests passed"
+          fi
+
+          echo "### 🤖 GPU Benchmarks CI/CD" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[![Ubuntu Latest Report](https://img.shields.io/badge/Ubuntu-Latest_Build-blue)](${BASE_URL}/latest/ubuntu-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Windows Latest Report](https://img.shields.io/badge/Windows-Latest_Build-blue)](${BASE_URL}/latest/windows-latest/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "[![Report History](https://img.shields.io/badge/All-Builds-green)](${BASE_URL}/)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build #${{ github.run_number }} | Status: $STATUS_ICON $STATUS_TEXT" >> $GITHUB_STEP_SUMMARY
