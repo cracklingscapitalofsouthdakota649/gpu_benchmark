@@ -152,11 +152,10 @@ jobs:
       - name: Download and Set up Allure CLI
         run: |
           echo "📦 Installing Allure CLI v${{ env.ALLURE_VERSION }}..."
-          wget -q https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.tgz
+          wget https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.tgz
           tar -xzf allure-${{ env.ALLURE_VERSION }}.tgz
           mv allure-${{ env.ALLURE_VERSION }} allure-commandline
           echo "$(pwd)/allure-commandline/bin" >> $GITHUB_PATH
-          allure --version
 
       - name: Download Allure Test Results
         uses: actions/download-artifact@v4
