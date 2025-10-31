@@ -6,10 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
-# Updated permissions for gh-pages deployment
 permissions:
   contents: write
+  pages: write
+  id-token: write
   actions: read
+  checks: read
 
 env:
   ALLURE_VERSION: 2.29.0
@@ -24,7 +26,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
 
-    # This output is correct
     outputs:
       run_outcome: ${{ steps.run_tests.outputs.run_outcome }}
 
@@ -148,10 +149,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # New step to get the repo name for the summary URL
-      - name: Get repository name
-        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
-
       - name: Download and Set up Allure CLI
         run: |
           echo "📦 Installing Allure CLI v${{ env.ALLURE_VERSION }}..."
@@ -176,7 +173,6 @@ jobs:
 
       - name: Restore Allure History
         run: |
-          # This step is critical to prevent conflicts with the deploy action
           if [ -d "${{ env.SITE_DIR }}/.git" ]; then
             rm -rf "${{ env.SITE_DIR }}/.git"
           fi
@@ -222,6 +218,7 @@ jobs:
             fi
           done
 
+      # (keep the dashboard + upload + deploy steps unchanged)
       - name: Finalize Reports and Build Index Page
         shell: bash
         run: |
@@ -342,29 +339,15 @@ jobs:
           </script>
           <hr><p><em>Generated automatically on $CURRENT_LA_TIME</em></p></body></html>" >> "$SITE_DIR/index.html"
 
-      # --- REMOVED STEP ---
-      # - name: Upload Pages Artifact
-      #   uses: actions/upload-pages-artifact@v3
-      #   with:
-      #     path: ${{ env.SITE_DIR }}
-
-      # --- NEW STEP ---
-      # Deploys the content of the 'site' directory to the 'gh-pages' branch
-      - name: Deploy to gh-pages
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' # Only deploy on main branch push
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ${{ env.SITE_DIR }}
-          publish_branch: gh-pages
-          force_orphan: true # Creates a clean branch history each time
+          path: ${{ env.SITE_DIR }}
 
-      # --- REMOVED STEP ---
-      # - name: Deploy to GitHub Pages
-      #   id: deployment
-      #   uses: actions/deploy-pages@v4
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
-      # This step is crucial for persisting the history dashboard for the *next* run
       - name: Upload Allure History Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -372,14 +355,11 @@ jobs:
           path: ${{ env.SITE_DIR }}
           retention-days: 7
 
-      # --- UPDATED STEP ---
-      # Builds the gh-pages URL manually and fixes the TEST_STATUS variable
       - name: Add Workflow Summary (Badges)
         run: |
-          BASE_URL="https://${{ github.repository_owner }}.github.io/${{ env.REPO_NAME }}"
-          
-          # Fix: Use the correct output name 'run_outcome' from the 'test' job
-          TEST_STATUS=${{ needs.test.outputs.run_outcome }}
+          PAGE_URL=${{ steps.deployment.outputs.page_url }}
+          BASE_URL="${PAGE_URL%/}"
+          TEST_STATUS=${{ needs.test.outputs.test_outcome }}
 
           if [[ "$TEST_STATUS" == "FAIL" ]]; then
             STATUS_ICON="❌"
