@@ -56,7 +56,7 @@ if "-h" in sys.argv or "--help" in sys.argv:
       Required <build_number>:  Unique integer build number for tagging (e.g., '101').
       Required <framework>:     robotics-bdd | robotics-tdd | gpu-benchmark
       Optional [test_arg]:      Target test/suite to run.
-                                (1) robotics-bdd  → marker (walking, pick, 'navigation or pick', etc.)
+                                (1) robotics-bdd  → marker (walking, pick, security, 'navigation or pick', etc.)
                                     - Default: navigation
                                 (2) robotics-tdd  → tests/test_*.py | marker (walking, pick, 'navigation or pick', etc.)
                                     - Default: navigation

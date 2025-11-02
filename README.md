@@ -151,10 +151,8 @@ gpu_benchmark/
 ├─ run_docker.py                       # Script to run tests inside Docker
 ├─ run_gpu_benchmark.bat               # Windows batch script to run benchmarks
 ├─ run_kubernestes.py                  # Kubernetes execution wrapper
-├─ gpu-workflow.yaml                   # Kubernetes manifest for deployment
-├─ gpu-benchmark-cpu-deployment.yaml   # Kubernetes manifest for CPU-only deployment
-├─ __init__.py
-├─ allure-report/                      # Static Allure HTML output directory
+├─ configs/                 		   # Kubernetes job configurations
+├─ allure-report/                      # Dynamic history report files
 ├─ allure-results/                     # Pytest-Allure raw results directory
 ├─ images/                             # Documentation image assets
 │  ├─ allure_report.jpg
@@ -207,7 +205,7 @@ gpu_benchmark/
 │  ├─ test_nvidia_tensorrt_cudnn.py
 │  └─ test_parallel_training.py
 ├─ .github/                            # GitHub Actions CI/CD workflows
-├─ venv310/                            # Virtual environment (auto-created)
+├─ venv310/                            # Optional virtual environment
 └─ .benchmarks/                        # Pytest-benchmark history
 ```
 

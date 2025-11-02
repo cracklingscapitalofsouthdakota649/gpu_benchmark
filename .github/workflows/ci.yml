@@ -109,7 +109,7 @@ jobs:
             echo "🦾 Running tests on Windows..."
           fi
 
-          pytest -v -m "gpu or cpu" --alluredir="$RESULTS_DIR" --import-mode=importlib
+          pytest -v -m "gpu or cpu or benchmark" --alluredir="$RESULTS_DIR" --import-mode=importlib
           TEST_EXIT_CODE=$?
 
           if [ ! -d "$RESULTS_DIR" ] || [ -z "$(find "$RESULTS_DIR" -type f -name '*.json' 2>/dev/null)" ]; then
